@@ -134,7 +134,7 @@ dmypy.json
 
 # private
 /application/db/
-/application/settings/private.py
+/instance/private.py
 /douban.user.js
 /index.html
-/test/
+/tests/

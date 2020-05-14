@@ -97,14 +97,14 @@ class Douban:
     def movie_subject(self, subject_id):
         return self.__get_result('/v2/movie/subject/{id}', {'id': subject_id})
 
-    def movie_subject_with_cookie(self, subject_id, cookie):
+    def movie_subject_with_cookies(self, subject_id, cookies):
         """
         This is a backup for movies that can't be found by self.movie_subject().
         The movie is probably x-rated and restricted to be accessed only after logging in.
         :return:
         """
         url = self.__get_url('/subject/{id}', 'movie', path_params={'id': subject_id})
-        soup = get_soup(request.Request(url, headers=dict(self.__headers, Cookie=cookie), method='GET'), pause=self.__pause)
+        soup = get_soup(request.Request(url, headers=dict(self.__headers, Cookie=cookies), method='GET'), pause=self.__pause)
         wrapper = soup.find('div', id='wrapper')
         subject = {}
 

@@ -1,7 +1,7 @@
-""" initialization
+""" Video views
 
 @Author Kingen
-@Date 2020/5/12
+@Date 2020/5/13
 """
 import base64
 import math
@@ -9,51 +9,32 @@ import os
 import re
 from itertools import groupby
 from operator import itemgetter
-from urllib import error, parse
+from urllib import parse, error
 
-from flask import Blueprint
 from pymediainfo import MediaInfo
 
-from application.apps.internet.douban import Douban
-from application.apps.internet.downloader import IDM, Thunder
-from application.apps.internet.resource import VideoSearchXl720, VideoSearch80s, VideoSearchXLC, VideoSearchZhandi, VideoSearchAxj, VideoSearchHhyyk, VideoSearchMP4
-from application.apps.internet.spider import pre_download
-from application.settings import get_logger
+from application.internet.downloader import IDM
+from application.internet.resource import VideoSearch80s, VideoSearchXl720, VideoSearchXLC, VideoSearchZhandi, VideoSearchAxj, VideoSearchHhyyk, VideoSearchMP4
+from application.internet.spider import pre_download
+from application.settings.config import get_logger
 from application.settings.database import get_db
-from application.settings.private import douban_api_key, idm_path, video_cdn
 from application.utils import file
 from application.utils.common import cmp_strings
 
-douban = Douban(douban_api_key)
-origins = ['https://movie.douban.com', 'http://localhost:63342']
-
 logger = get_logger(__name__)
-video_blu = Blueprint('video', __name__)
 
 VIDEO_SUFFIXES = ('.avi', '.rmvb', '.mp4', '.mkv')
 standard_kbps = 2500  # kb/s
-
-idm = IDM(idm_path)
-
-
-def add_subject(subject_id, cookie=None):
-    try:
-        subject = douban.movie_subject(subject_id)
-    except error.HTTPError as e:
-        if e.code == 404 and cookie:
-            subject = douban.movie_subject_with_cookie(subject_id, cookie)
-        else:
-            return False
-    return add_movie(subject)
 
 
 class VideoManager:
     CHINESE = ['汉语普通话', '普通话', '粤语', '闽南语', '河南方言', '贵州方言', '贵州独山话']
     JUNK_SITES = ['yutou.tv', '80s.la', '80s.im', '2tu.cc', 'bofang.cc:', 'dl.y80s.net', '80s.bz', 'xubo.cc']
 
-    def __init__(self, cdn) -> None:
+    def __init__(self, cdn, idm_path='IDM.exe') -> None:
         self.cdn = cdn
         self.__temp_dir = os.path.join(self.cdn, 'Temp')
+        self.__idm = IDM(idm_path)
 
     @property
     def cdn(self):
@@ -65,23 +46,19 @@ class VideoManager:
             cdn = './'
         self.__cdn = cdn
 
-    def search_resources(self, subject_id: int, cookie=None):
+    def search_resources(self, subject_id: int):
         """
         Search and download resources for subject specified by id.
         :param subject_id:
-        :return: -1: no subject/resources, 1: archived, 2/3: downloading/temp
+        :return: -1: no subject/resources, 1: archived, 2/3: downloading/archive_temp
         """
-        result = get_movie(id=subject_id)
-        if result is None:
-            if add_subject(subject_id, cookie):
-                result = get_movie(id=subject_id)
-            else:
-                logger.info('No subject found with id: %d', subject_id)
-                update_movie(subject_id, archived=-1)
-                return -1
+        subject = get_movie(id=subject_id)
+        if subject is None:
+            logger.info('No subject found with id: %d', subject_id)
+            return -1
         all_sites = [VideoSearch80s(), VideoSearchXl720(), VideoSearchXLC(),
                      VideoSearchZhandi(), VideoSearchAxj(), VideoSearchHhyyk(), VideoSearchMP4()]
-        return self.__collect_subject(result, all_sites)
+        return self.__collect_subject(subject, all_sites)
 
     def archive_temp(self, subject_id):
         """
@@ -156,15 +133,15 @@ class VideoManager:
             url_count = 0
             for u, filename, ext in links['http'].values():
                 logger.info('Add IDM task of %s, downloading from %s to the temporary dir', title, u)
-                idm.add_task(u, self.__temp_dir, '%d_%s_http_%d_%s' % (subject_id, title, url_count, filename))
+                self.__idm.add_task(u, self.__temp_dir, '%d_%s_http_%d_%s' % (subject_id, title, url_count, filename))
                 url_count += 1
-            thunder = Thunder()
-            for p in ['ed2k', 'ftp']:
-                for u, filename, ext in links[p].values():
-                    logger.info('Add Thunder task of %s, downloading from %s to the temporary dir', title, u)
-                    thunder.add_task(u, '%d_%s_%s_%d_%s' % (subject_id, title, p, url_count, filename))
-                    url_count += 1
-            thunder.commit_tasks()
+            # thunder = Thunder()
+            # for p in ['ed2k', 'ftp']:
+            #     for u, filename, ext in links[p].values():
+            #         logger.info('Add Thunder task of %s, downloading from %s to the temporary dir', title, u)
+            #         thunder.add_task(u, '%d_%s_%s_%d_%s' % (subject_id, title, p, url_count, filename))
+            #         url_count += 1
+            # thunder.commit_tasks()
 
             if url_count == 0:
                 logger.warning('No resources found for: %s', title)
@@ -201,7 +178,7 @@ class VideoManager:
             os.makedirs(path, exist_ok=True)
             episode = 'E%%0%dd%%s' % math.ceil(math.log10(episodes_count + 1))
             for i, url in enumerate(urls):
-                idm.add_task(url, path, episode % ((i + 1), os.path.splitext(url)[1]))
+                self.__idm.add_task(url, path, episode % ((i + 1), os.path.splitext(url)[1]))
             logger.info('Tasks added: %d for %s. Downloading...', episodes_count, title)
             update_movie(subject_id, archived=2)
             return 2
@@ -334,6 +311,17 @@ class VideoManager:
         return os.path.join(self.cdn, subtype, language), filename
 
 
+def movie_subject(subject_id, douban, cookies=None):
+    try:
+        subject = douban.movie_subject(subject_id)
+    except error.HTTPError as e:
+        if e.code == 404 and cookies:
+            subject = douban.movie_subject_with_cookie(subject_id, cookies)
+        else:
+            return None
+    return subject
+
+
 def get_duration(filepath):
     media_info = MediaInfo.parse(filepath)
     tracks = dict([(x.track_type, x) for x in media_info.tracks])
@@ -444,13 +432,10 @@ def classify_url(url: str):
     return 'unknown', url
 
 
-manager = VideoManager(video_cdn)
-
-
 def add_movie(subject):
     connection = get_db()
     cursor = connection.cursor()
-    cursor.execute('INSERT INTO movie(id, title, alt, status, tag_date, original_title, aka, subtype, languages, '
+    cursor.execute('INSERT INTO movie(id, title, alt,status, tag_date, original_title, aka, subtype, languages, '
                    'year, durations, current_season, episodes_count, seasons_count, last_update, archived) '
                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME(\'now\'), 0)',
                    ([subject[key] for key in [
@@ -493,7 +478,7 @@ def get_movie(**params):
         cursor.execute('SELECT * FROM movie')
     else:
         cursor.execute('SELECT * FROM movie WHERE %s' % (' AND '.join(['%s = :%s' % (k, k) for k in params])), params)
-    result = cursor.fetchone()
-    if result:
-        return dict(result)
+    r = cursor.fetchone()
+    if r:
+        return dict(r)
     return None

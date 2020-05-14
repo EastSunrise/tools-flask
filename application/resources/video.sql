@@ -1,11 +1,11 @@
-CREATE TABLE IF NOT EXISTS movies
+CREATE TABLE IF NOT EXISTS movie
 (
     id             INTEGER NOT NULL
         primary key,
     title          TEXT    NOT NULL,
     alt            TEXT    NOT NULL,
     status         TEXT    NOT NULL, -- wish/do/collect
-    tag_date       TEXT    NOT NULL, -- last date updating the status
+    tag_date       TEXT,             -- last date updating the status
     original_title TEXT,
     aka            list,
     subtype        TEXT    NOT NULL,
@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS movies
     current_season INTEGER,
     episodes_count INTEGER,
     seasons_count  INTEGER,
-    archived       INTEGER NOT NULL, -- 0: unarchived, 1: archived, 2: downloading, 3: temp, -1: no resources
+    archived       INTEGER NOT NULL, -- 0: unarchived, 1: archived, 2: downloading, 3: archive_temp, -1: no resources
     -- no resources
     location       TEXT,
     source         TEXT,
