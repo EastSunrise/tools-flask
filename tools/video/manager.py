@@ -4,24 +4,24 @@
 @Date 2020/5/13
 """
 import base64
+import logging
 import math
 import os
 import re
 from itertools import groupby
 from operator import itemgetter
-from urllib import parse, error
+from sqlite3 import connect, PARSE_DECLTYPES, Row
+from urllib import parse
 
 from pymediainfo import MediaInfo
 
-from application.internet.downloader import IDM
-from application.internet.resource import VideoSearch80s, VideoSearchXl720, VideoSearchXLC, VideoSearchZhandi, VideoSearchAxj, VideoSearchHhyyk, VideoSearchMP4
-from application.internet.spider import pre_download
-from application.settings.config import get_logger
-from application.settings.database import get_db
-from application.utils import file
-from application.utils.common import cmp_strings
+from tools.internet.downloader import IDM, Thunder
+from tools.internet.resource import VideoSearch80s, VideoSearchXl720, VideoSearchXLC, VideoSearchZhandi, VideoSearchAxj, VideoSearchHhyyk, VideoSearchMP4
+from tools.internet.spider import pre_download
+from tools.utils import file
+from tools.utils.common import cmp_strings
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 VIDEO_SUFFIXES = ('.avi', '.rmvb', '.mp4', '.mkv')
 standard_kbps = 2500  # kb/s
@@ -31,8 +31,10 @@ class VideoManager:
     CHINESE = ['汉语普通话', '普通话', '粤语', '闽南语', '河南方言', '贵州方言', '贵州独山话']
     JUNK_SITES = ['yutou.tv', '80s.la', '80s.im', '2tu.cc', 'bofang.cc:', 'dl.y80s.net', '80s.bz', 'xubo.cc']
 
-    def __init__(self, cdn, idm_path='IDM.exe') -> None:
+    def __init__(self, cdn, db_path, idm_path='IDM.exe') -> None:
         self.cdn = cdn
+        self.__db = db_path
+        self.__con = None
         self.__temp_dir = os.path.join(self.cdn, 'Temp')
         self.__idm = IDM(idm_path)
 
@@ -46,13 +48,25 @@ class VideoManager:
             cdn = './'
         self.__cdn = cdn
 
+    @property
+    def __connection(self):
+        if self.__con is None:
+            self.__con = connect(self.__db, detect_types=PARSE_DECLTYPES)
+            self.__con.row_factory = Row
+            self.__con.set_trace_callback(lambda x: logger.info('Execute: %s', x))
+        return self.__con
+
+    def close_connection(self):
+        if self.__con is not None:
+            self.__con.close()
+
     def search_resources(self, subject_id: int):
         """
         Search and download resources for subject specified by id.
         :param subject_id:
         :return: -1: no subject/resources, 1: archived, 2/3: downloading/archive_temp
         """
-        subject = get_movie(id=subject_id)
+        subject = self.get_movie(id=subject_id)
         if subject is None:
             logger.info('No subject found with id: %d', subject_id)
             return -1
@@ -66,7 +80,7 @@ class VideoManager:
         :return: -2: IOError, -1: no qualified file, 1: archived
         """
         paths = [os.path.join(self.__temp_dir, x) for x in os.listdir(self.__temp_dir) if x.startswith(subject_id)]
-        subject = get_movie(id=subject_id)
+        subject = self.get_movie(id=subject_id)
         weights = {}
         for path in paths:
             try:
@@ -77,7 +91,7 @@ class VideoManager:
         chosen = max(weights, key=lambda x: weights[x])
         if weights[chosen] < 0:
             logger.warning('No qualified video file: %s', subject['title'])
-            update_movie(subject_id, archived=-1)
+            self.update_movie(subject_id, archived=-1)
             return -1
         else:
             logger.info('Chosen file: %.2f, %s', weights[chosen], chosen)
@@ -89,7 +103,7 @@ class VideoManager:
                 return -2
         for p in weights:
             file.del_to_recycle(p)
-        update_movie(subject_id, archived=1, location=dst)
+        self.update_movie(subject_id, archived=1, location=dst)
         return 1
 
     def __collect_subject(self, subject, sites):
@@ -99,7 +113,7 @@ class VideoManager:
         logger.info('Collecting subject: %s, %s', title, subject['alt'])
         if archived:
             logger.info('File exists for the subject %s: %s', title, archived)
-            update_movie(subject_id, archived=1, location=archived)
+            self.update_movie(subject_id, archived=1, location=archived)
             return 1
 
         # movie
@@ -135,20 +149,20 @@ class VideoManager:
                 logger.info('Add IDM task of %s, downloading from %s to the temporary dir', title, u)
                 self.__idm.add_task(u, self.__temp_dir, '%d_%s_http_%d_%s' % (subject_id, title, url_count, filename))
                 url_count += 1
-            # thunder = Thunder()
-            # for p in ['ed2k', 'ftp']:
-            #     for u, filename, ext in links[p].values():
-            #         logger.info('Add Thunder task of %s, downloading from %s to the temporary dir', title, u)
-            #         thunder.add_task(u, '%d_%s_%s_%d_%s' % (subject_id, title, p, url_count, filename))
-            #         url_count += 1
-            # thunder.commit_tasks()
+            thunder = Thunder()
+            for p in ['ed2k', 'ftp']:
+                for u, filename, ext in links[p].values():
+                    logger.info('Add Thunder task of %s, downloading from %s to the temporary dir', title, u)
+                    thunder.add_task(u, '%d_%s_%s_%d_%s' % (subject_id, title, p, url_count, filename))
+                    url_count += 1
+            thunder.commit_tasks()
 
             if url_count == 0:
                 logger.warning('No resources found for: %s', title)
-                update_movie(subject_id, archived=-1)
+                self.update_movie(subject_id, archived=-1)
                 return -1
             logger.info('Tasks added: %d for %s. Downloading...', url_count, title)
-            update_movie(subject_id, archived=3)
+            self.update_movie(subject_id, archived=3)
             return 3
         else:
             episodes_count = subject['episodes_count']
@@ -172,7 +186,7 @@ class VideoManager:
             empties = [str(i + 1) for i, x in enumerate(urls) if x is None]
             if len(empties) > 0:
                 logger.info('Not enough episodes for %s, total: %d, lacking: %s', subject['title'], episodes_count, ', '.join(empties))
-                update_movie(subject_id, archived=-1)
+                self.update_movie(subject_id, archived=-1)
                 return -1
             logger.info('Add IDM tasks of %s, %d episodes', title, episodes_count)
             os.makedirs(path, exist_ok=True)
@@ -180,7 +194,7 @@ class VideoManager:
             for i, url in enumerate(urls):
                 self.__idm.add_task(url, path, episode % ((i + 1), os.path.splitext(url)[1]))
             logger.info('Tasks added: %d for %s. Downloading...', episodes_count, title)
-            update_movie(subject_id, archived=2)
+            self.update_movie(subject_id, archived=2)
             return 2
 
     def __extract_tv_urls(self, http_resources, episodes_count):
@@ -310,16 +324,53 @@ class VideoManager:
         filename = re.sub(r'[\\/:*?"<>|]', '$', filename)
         return os.path.join(self.cdn, subtype, language), filename
 
+    def add_movie(self, subject):
+        con = self.__connection
+        cursor = con.cursor()
+        cursor.execute('INSERT INTO movie(id, title, alt,status, tag_date, original_title, aka, subtype, languages, '
+                       'year, durations, current_season, episodes_count, seasons_count, last_update, archived) '
+                       'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME(\'now\'), 0)',
+                       ([subject[key] for key in [
+                           'id', 'title', 'alt', 'status', 'tag_date', 'original_title', 'aka', 'subtype', 'languages',
+                           'year', 'durations', 'current_season', 'episodes_count', 'seasons_count'
+                       ]]))
+        if cursor.rowcount != 1:
+            logger.error('Failed to Add movie: %s. ROLLBACK!', subject['title'])
+            con.rollback()
+            return False
+        con.commit()
+        return True
 
-def movie_subject(subject_id, douban, cookies=None):
-    try:
-        subject = douban.movie_subject(subject_id)
-    except error.HTTPError as e:
-        if e.code == 404 and cookies:
-            subject = douban.movie_subject_with_cookie(subject_id, cookies)
+    def update_movie(self, subject_id: int, ignore_none=True, **kwargs):
+        params = {}
+        for k, v in kwargs.items():
+            if k in ['title', 'alt', 'status', 'tag_date', 'original_title', 'aka', 'subtype', 'languages', 'year', 'durations',
+                     'current_season', 'episodes_count', 'seasons_count', 'archived', 'location', 'source'] \
+                    and (not ignore_none or (ignore_none and v is not None)):
+                params[k] = v
+        if not params or len(params) == 0:
+            raise ValueError('No params to update')
+        con = self.__connection
+        cursor = con.cursor()
+        cursor.execute('UPDATE movie SET last_update=DATETIME(\'now\'), %s WHERE id = %d'
+                       % (', '.join(['%s = :%s' % (k, k) for k in params]), subject_id), params)
+        if cursor.rowcount != 1:
+            logger.error('Failed to update movie: %d', subject_id)
+            con.rollback()
+            return False
+        con.commit()
+        return True
+
+    def get_movie(self, **params):
+        cursor = self.__connection.cursor()
+        if not params or len(params) == 0:
+            cursor.execute('SELECT * FROM movie')
         else:
-            return None
-    return subject
+            cursor.execute('SELECT * FROM movie WHERE %s' % (' AND '.join(['%s = :%s' % (k, k) for k in params])), params)
+        r = cursor.fetchone()
+        if r:
+            return dict(r)
+        return None
 
 
 def get_duration(filepath):
@@ -430,55 +481,3 @@ def classify_url(url: str):
         if url.startswith(head):
             return head, url
     return 'unknown', url
-
-
-def add_movie(subject):
-    connection = get_db()
-    cursor = connection.cursor()
-    cursor.execute('INSERT INTO movie(id, title, alt,status, tag_date, original_title, aka, subtype, languages, '
-                   'year, durations, current_season, episodes_count, seasons_count, last_update, archived) '
-                   'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME(\'now\'), 0)',
-                   ([subject[key] for key in [
-                       'id', 'title', 'alt', 'status', 'tag_date', 'original_title', 'aka', 'subtype', 'languages',
-                       'year', 'durations', 'current_season', 'episodes_count', 'seasons_count'
-                   ]]))
-    if cursor.rowcount != 1:
-        logger.error('Failed to Add movie: %s. ROLLBACK!', subject['title'])
-        connection.rollback()
-        return False
-    connection.commit()
-    return True
-
-
-def update_movie(subject_id: int, ignore_none=True, **kwargs):
-    params = {}
-    for k, v in kwargs.items():
-        if k in ['title', 'alt', 'status', 'tag_date', 'original_title', 'aka', 'subtype', 'languages', 'year', 'durations',
-                 'current_season', 'episodes_count', 'seasons_count', 'archived', 'location', 'source'] \
-                and (not ignore_none or (ignore_none and v is not None)):
-            params[k] = v
-    if not params or len(params) == 0:
-        raise ValueError('No params to update')
-    connection = get_db()
-    cursor = connection.cursor()
-    cursor.execute('UPDATE movie SET last_update=DATETIME(\'now\'), %s WHERE id = %d'
-                   % (', '.join(['%s = :%s' % (k, k) for k in params]), subject_id), params)
-    if cursor.rowcount != 1:
-        logger.error('Failed to update movie: %d', subject_id)
-        connection.rollback()
-        return False
-    connection.commit()
-    return True
-
-
-def get_movie(**params):
-    connection = get_db()
-    cursor = connection.cursor()
-    if not params or len(params) == 0:
-        cursor.execute('SELECT * FROM movie')
-    else:
-        cursor.execute('SELECT * FROM movie WHERE %s' % (' AND '.join(['%s = :%s' % (k, k) for k in params])), params)
-    r = cursor.fetchone()
-    if r:
-        return dict(r)
-    return None

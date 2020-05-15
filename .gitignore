@@ -133,8 +133,4 @@ dmypy.json
 .vscode/*
 
 # private
-/application/db/
-/instance/private.py
-/douban.user.js
-/index.html
 /tests/

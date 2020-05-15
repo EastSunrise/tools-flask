@@ -3,13 +3,14 @@
 @Author Kingen
 @Date 2020/5/13
 """
+import logging
 from sqlite3 import register_adapter, register_converter, connect, PARSE_DECLTYPES, Row
 
 import click
 from flask import g, current_app
 from flask.cli import with_appcontext
 
-from application.settings.config import logger
+logger = logging.getLogger(__name__)
 
 register_adapter(list, lambda x: '[%s]' % '_'.join(x))
 register_converter('list', lambda x: [] if x.decode('utf-8') == '[]' else x.decode('utf-8').strip('[]').split('_'))
@@ -31,7 +32,7 @@ def close_db(e=None):
 
 def init_db():
     db = get_db()
-    with current_app.open_resource('resources/video.sql') as f:
+    with current_app.open_resource('resources/tools.sql') as f:
         db.executescript(f.read().decode('utf8'))
 
 

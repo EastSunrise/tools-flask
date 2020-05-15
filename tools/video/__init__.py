@@ -3,21 +3,24 @@
 @Author Kingen
 @Date 2020/5/12
 """
+import logging
 import os
+from urllib import error
 
-from flask import Blueprint, request
+from flask import Blueprint, request, g
 from flask_cors import cross_origin
 
-from application.internet.douban import Douban
-from instance.private import video_cdn, idm_path, douban_api_key
-from .manager import VideoManager, get_movie, movie_subject, add_movie
+from instance.private import video_cdn, idm_path, douban_api_key, Cookie, video_db
+from tools.internet.douban import Douban
+from .manager import VideoManager
 
 video_blu = Blueprint('video', __name__, url_prefix='/video')
+
+logger = logging.getLogger(__name__)
 
 origins = ['https://movie.douban.com', 'http://localhost:63342']
 
 douban = Douban(douban_api_key)
-manager = VideoManager(video_cdn, idm_path)
 
 
 @video_blu.route('/<subject_id>')
@@ -28,7 +31,7 @@ def archived(subject_id):
     :return: archived info of the subject
     """
     subject_id = int(subject_id)
-    movie = get_movie(id=subject_id)
+    movie = manager().get_movie(id=subject_id)
     if movie:
         return {
             'id': subject_id,
@@ -46,15 +49,18 @@ def archived(subject_id):
 @cross_origin()
 def add():
     subject_id = int(request.args.get('id'))
-    cookies = request.args.get('cookies')
-    subject = movie_subject(subject_id, douban, cookies)
-    if subject is None:
-        return result(False)
+    try:
+        subject = douban.movie_subject(subject_id)
+    except error.HTTPError as e:
+        if e.code == 404 and Cookie:
+            subject = douban.movie_subject_with_cookie(subject_id, Cookie)
+        else:
+            return result(False)
     subject['status'] = request.args.get('status')
     if subject['status'] is None:
         subject['status'] = 'unmarked'
     subject['tag_date'] = request.args.get('tag_date')
-    return result(add_movie(subject))
+    return result(manager().add_movie(subject))
 
 
 @video_blu.route('/search')
@@ -62,7 +68,7 @@ def add():
 def search():
     subject_id = int(request.args.get('id'))
     return {
-        'code': manager.search_resources(subject_id)
+        'code': manager().search_resources(subject_id)
     }
 
 
@@ -70,7 +76,7 @@ def search():
 @cross_origin()
 def play(subject_id):
     subject_id = int(subject_id)
-    movie = get_movie(id=subject_id)
+    movie = manager().get_movie(id=subject_id)
     if movie:
         location = movie['location']
         if movie['subtype'] == 'movie' and os.path.isfile(location):
@@ -87,8 +93,20 @@ def play(subject_id):
 def archive_temp():
     subject_id = int(request.args.get('id'))
     return {
-        'code': manager.archive_temp(subject_id)
+        'code': manager().archive_temp(subject_id)
     }
+
+
+@video_blu.teardown_request
+def close_connection(e=None):
+    if 'manager' in g and g.manager is not None:
+        g.manager.close_connection()
+
+
+def manager():
+    if 'manager' not in g:
+        g.manager = VideoManager(video_cdn, video_db, idm_path)
+    return g.manager
 
 
 def result(is_success: bool):

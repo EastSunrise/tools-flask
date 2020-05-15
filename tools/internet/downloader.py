@@ -9,6 +9,8 @@ import time
 from subprocess import run, CompletedProcess
 from urllib.request import urlopen, Request
 
+from win32com.client import Dispatch
+
 from . import logger
 from .spider import quote_url, pre_download, base_headers
 
@@ -208,3 +210,35 @@ class Downloader:
         @property
         def done(self):
             return self.done_size >= self.__size
+
+
+class Thunder:
+    """
+    Call local Thunder COM object to add_task resources by using apis of win32com
+    Version of Thunder needs to 9/X.
+    """
+
+    def __init__(self) -> None:
+        self.__client = Dispatch('ThunderAgent.Agent64.1')
+
+    def add_task(self, url, filename, refer_url=''):
+        """
+        add add_task task
+        :param filename: basename of target file. It will be completed automatically if an extension isn't included.
+            This is valid only when popping up a add_task panel.
+        :param refer_url: netloc referred to
+        :return:
+        """
+        self.__client.addTask(url, filename, '', '', refer_url, -1, 0, -1)
+
+    def commit_tasks(self):
+        """
+        It is configurable in the Settings whether to pop up a add_task panel.
+        """
+        return self.__client.commitTasks()
+
+    def cancel_tasks(self):
+        """
+        cancel all tasks added by self.add_task()
+        """
+        self.__client.cancelTasks()

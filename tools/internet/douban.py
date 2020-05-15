@@ -10,7 +10,8 @@ Json files in the 'douban' directory are examples  for each functions
 import json
 import os
 import re
-from urllib import parse, request
+from urllib import parse
+from urllib.request import Request
 
 import bs4
 
@@ -97,14 +98,14 @@ class Douban:
     def movie_subject(self, subject_id):
         return self.__get_result('/v2/movie/subject/{id}', {'id': subject_id})
 
-    def movie_subject_with_cookies(self, subject_id, cookies):
+    def movie_subject_with_cookie(self, subject_id, cookie):
         """
         This is a backup for movies that can't be found by self.movie_subject().
         The movie is probably x-rated and restricted to be accessed only after logging in.
         :return:
         """
         url = self.__get_url('/subject/{id}', 'movie', path_params={'id': subject_id})
-        soup = get_soup(request.Request(url, headers=dict(self.__headers, Cookie=cookies), method='GET'), pause=self.__pause)
+        soup = get_soup(Request(url, headers=dict(self.__headers, Cookie=cookie), method='GET'), pause=self.__pause)
         wrapper = soup.find('div', id='wrapper')
         subject = {}
 
@@ -229,7 +230,7 @@ class Douban:
         url = self.__get_url('/people/{id}/{cat}', cat, {'id': user_id, 'cat': catalogs[cat]}, {'start': start})
         headers = {'Cookie': cookie}
         headers.update(self.__headers)
-        soup = get_soup(request.Request(url, headers=headers, method='GET'), pause=self.__pause)
+        soup = get_soup(Request(url, headers=headers, method='GET'), pause=self.__pause)
         results = []
         content = soup.find('div', id='content')
         for div in content.find('div', class_='article').find_all('div', class_='item'):
@@ -265,7 +266,7 @@ class Douban:
                              query_params={'sort': sort_by, 'start': start, 'mode': 'list'})
         headers = {'Cookie': cookie}
         headers.update(self.__headers)
-        soup = get_soup(request.Request(url, headers=headers, method='GET'), pause=self.__pause)
+        soup = get_soup(Request(url, headers=headers, method='GET'), pause=self.__pause)
         results = []
         for li in soup.find('ul', class_='list-view').find_all('li'):
             div = li.div.div
@@ -305,5 +306,5 @@ class Douban:
 
     def __get_result(self, relative_url, path_params=None, query_params=None):
         url = self.__get_url(path=relative_url, netloc_cat='api', path_params=path_params, query_params=query_params)
-        req = request.Request(url, headers=self.__headers, method='GET')
+        req = Request(url, headers=self.__headers, method='GET')
         return json.loads(do_request(req, self.__pause), encoding='utf-8')
