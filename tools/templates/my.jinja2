@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>My Movies</title>
+</head>
+<body>
+<div>
+    <form id="form" action="{{ url_for('video.my_movies') }}" method="get">
+        <label for="archived">归档</label>
+        <select id="archived" class="filter" name="archived">
+            <option value="" {% if archived is blank %}selected="selected"{% endif %}>所有</option>
+            {% for value, title in archived_iter %}
+                <option value="{{ value }}"
+                        {% if archived == value %}selected="selected"{% endif %}>{{ title }}</option>
+            {% endfor %}
+        </select>
+        <label for="status">类型</label>
+        <select id="status" class="filter" name="status">
+            <option value="" {% if status is blank %}selected="selected"{% endif %}>所有</option>
+            {% for value, title in status_iter %}
+                <option value="{{ value }}"
+                        {% if status == value %}selected="selected"{% endif %}>{{ title }}</option>
+            {% endfor %}
+        </select>
+        <label for="order_by">排序</label>
+        <select id="order_by" class="filter" name="order_by">
+            {% for value, title in order_by_iter %}
+                <option value="{{ value }}"
+                        {% if order_by == value %}selected="selected"{% endif %}>{{ title }}</option>
+            {% endfor %}
+        </select>
+    </form>
+    <ul id="subjects">
+        {% for subject in subjects %}
+            <li id="{{ subject['id'] }}" title="{{ subject['title'] }}">
+                <a href="{{ subject['alt'] }}" target="_blank">{{ subject['title'] }} {{ subject['original_title'] }}
+                    ({{ subject['year'] }})</a>
+            </li>
+        {% endfor %}
+    </ul>
+</div>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+<script type="text/javascript" src="{{ url_for('static', filename='my.js') }}"></script>
+</body>
+</html>

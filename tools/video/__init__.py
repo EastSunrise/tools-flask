@@ -7,11 +7,13 @@ import logging
 import os
 from urllib import error
 
-from flask import Blueprint, request, g
+from flask import Blueprint, request, g, render_template
 from flask_cors import cross_origin
 
 from instance.private import video_cdn, idm_path, douban_api_key, Cookie, video_db
 from tools.internet.douban import Douban
+from tools.utils.common import display_enums
+from tools.video.enums import Status, Archived
 from .manager import VideoManager
 
 video_blu = Blueprint('video', __name__, url_prefix='/video')
@@ -23,14 +25,30 @@ origins = ['https://movie.douban.com', 'http://localhost:63342']
 douban = Douban(douban_api_key)
 
 
-@video_blu.route('/<subject_id>')
-@cross_origin()
-def archived(subject_id):
+@video_blu.route('/my')
+def my_movies():
+    params = {
+        'archived': request.args.get('archived'),
+        'status': request.args.get('status'),
+        'order_by': request.args.get('order_by', default='last_update')
+    }
+    if params['order_by'] == 'last_update' or params['order_by'] == 'tag_date':
+        params['desc'] = True
+    subjects = manager().get_movies(ignore_blank=True, **params)
+    return render_template(
+        'my.jinja2', subjects=subjects, **params, archived_iter=display_enums(Archived), status_iter=display_enums(Status),
+        order_by_iter=[('last_update', '更新时间'), ('title', '标题'), ('tag_date', '标记时间')]
+    )
+
+
+@video_blu.route('/subject')
+@cross_origin(origins=origins)
+def is_archived():
     """
     params: id=<subject_id>
     :return: archived info of the subject
     """
-    subject_id = int(subject_id)
+    subject_id = request.args.get('id', type=int)
     movie = manager().get_movie(id=subject_id)
     if movie:
         return {
@@ -46,9 +64,9 @@ def archived(subject_id):
 
 
 @video_blu.route('/add')
-@cross_origin()
+@cross_origin(origins=origins)
 def add():
-    subject_id = int(request.args.get('id'))
+    subject_id = request.args.get('id', type=int)
     try:
         subject = douban.movie_subject(subject_id)
     except error.HTTPError as e:
@@ -56,7 +74,7 @@ def add():
             subject = douban.movie_subject_with_cookie(subject_id, Cookie)
         else:
             return result(False)
-    subject['status'] = request.args.get('status')
+    subject['status'] = request.args.get('status', type=Status)
     if subject['status'] is None:
         subject['status'] = 'unmarked'
     subject['tag_date'] = request.args.get('tag_date')
@@ -64,18 +82,18 @@ def add():
 
 
 @video_blu.route('/search')
-@cross_origin()
+@cross_origin(origins=origins)
 def search():
-    subject_id = int(request.args.get('id'))
+    subject_id = request.args.get('id', type=int)
     return {
-        'code': manager().search_resources(subject_id)
+        'archived': manager().search_resources(subject_id)
     }
 
 
-@video_blu.route('/<subject_id>/play')
-@cross_origin()
-def play(subject_id):
-    subject_id = int(subject_id)
+@video_blu.route('/play')
+@cross_origin(origins=origins)
+def play():
+    subject_id = request.args.get('id', type=int)
     movie = manager().get_movie(id=subject_id)
     if movie:
         location = movie['location']
@@ -89,11 +107,11 @@ def play(subject_id):
 
 
 @video_blu.route('/temp')
-@cross_origin()
+@cross_origin(origins=origins)
 def archive_temp():
-    subject_id = int(request.args.get('id'))
+    subject_id = request.args.get('id', type=int)
     return {
-        'code': manager().archive_temp(subject_id)
+        'archived': manager().archive_temp(subject_id)
     }
 
 

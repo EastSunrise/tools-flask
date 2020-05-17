@@ -49,7 +49,7 @@ class VideoManager:
         self.__cdn = cdn
 
     @property
-    def __connection(self):
+    def connection(self):
         if self.__con is None:
             self.__con = connect(self.__db, detect_types=PARSE_DECLTYPES)
             self.__con.row_factory = Row
@@ -64,12 +64,12 @@ class VideoManager:
         """
         Search and download resources for subject specified by id.
         :param subject_id:
-        :return: -1: no subject/resources, 1: archived, 2/3: downloading/archive_temp
+        :return: archived
         """
         subject = self.get_movie(id=subject_id)
         if subject is None:
             logger.info('No subject found with id: %d', subject_id)
-            return -1
+            return 'none'
         all_sites = [VideoSearch80s(), VideoSearchXl720(), VideoSearchXLC(),
                      VideoSearchZhandi(), VideoSearchAxj(), VideoSearchHhyyk(), VideoSearchMP4()]
         return self.__collect_subject(subject, all_sites)
@@ -79,7 +79,7 @@ class VideoManager:
         After finishing all IDM and Thunder tasks.
         :return: -2: IOError, -1: no qualified file, 1: archived
         """
-        paths = [os.path.join(self.__temp_dir, x) for x in os.listdir(self.__temp_dir) if x.startswith(subject_id)]
+        paths = [os.path.join(self.__temp_dir, x) for x in os.listdir(self.__temp_dir) if x.startswith(str(subject_id))]
         subject = self.get_movie(id=subject_id)
         weights = {}
         for path in paths:
@@ -91,8 +91,8 @@ class VideoManager:
         chosen = max(weights, key=lambda x: weights[x])
         if weights[chosen] < 0:
             logger.warning('No qualified video file: %s', subject['title'])
-            self.update_movie(subject_id, archived=-1)
-            return -1
+            self.update_movie(subject_id, archived='none')
+            return 'none'
         else:
             logger.info('Chosen file: %.2f, %s', weights[chosen], chosen)
             ext = os.path.splitext(chosen)[1]
@@ -103,8 +103,8 @@ class VideoManager:
                 return -2
         for p in weights:
             file.del_to_recycle(p)
-        self.update_movie(subject_id, archived=1, location=dst)
-        return 1
+        self.update_movie(subject_id, archived='playable', location=dst)
+        return 'playable'
 
     def __collect_subject(self, subject, sites):
         subject_id, title, subtype = subject['id'], subject['title'], subject['subtype']
@@ -113,8 +113,8 @@ class VideoManager:
         logger.info('Collecting subject: %s, %s', title, subject['alt'])
         if archived:
             logger.info('File exists for the subject %s: %s', title, archived)
-            self.update_movie(subject_id, archived=1, location=archived)
-            return 1
+            self.update_movie(subject_id, archived='playable', location=archived)
+            return 'playable'
 
         # movie
         if subtype == 'movie':
@@ -159,11 +159,11 @@ class VideoManager:
 
             if url_count == 0:
                 logger.warning('No resources found for: %s', title)
-                self.update_movie(subject_id, archived=-1)
-                return -1
+                self.update_movie(subject_id, archived='none')
+                return 'none'
             logger.info('Tasks added: %d for %s. Downloading...', url_count, title)
-            self.update_movie(subject_id, archived=3)
-            return 3
+            self.update_movie(subject_id, archived='downloading')
+            return 'downloading'
         else:
             episodes_count = subject['episodes_count']
             links = {'http': [], 'ed2k': [], 'pan': [], 'ftp': [], 'magnet': [], 'torrent': [], 'unknown': []}
@@ -186,16 +186,16 @@ class VideoManager:
             empties = [str(i + 1) for i, x in enumerate(urls) if x is None]
             if len(empties) > 0:
                 logger.info('Not enough episodes for %s, total: %d, lacking: %s', subject['title'], episodes_count, ', '.join(empties))
-                self.update_movie(subject_id, archived=-1)
-                return -1
+                self.update_movie(subject_id, archived='none')
+                return 'none'
             logger.info('Add IDM tasks of %s, %d episodes', title, episodes_count)
             os.makedirs(path, exist_ok=True)
             episode = 'E%%0%dd%%s' % math.ceil(math.log10(episodes_count + 1))
             for i, url in enumerate(urls):
                 self.__idm.add_task(url, path, episode % ((i + 1), os.path.splitext(url)[1]))
             logger.info('Tasks added: %d for %s. Downloading...', episodes_count, title)
-            self.update_movie(subject_id, archived=2)
-            return 2
+            self.update_movie(subject_id, archived='idm')
+            return 'idm'
 
     def __extract_tv_urls(self, http_resources, episodes_count):
         for r in http_resources:
@@ -325,7 +325,7 @@ class VideoManager:
         return os.path.join(self.cdn, subtype, language), filename
 
     def add_movie(self, subject):
-        con = self.__connection
+        con = self.connection
         cursor = con.cursor()
         cursor.execute('INSERT INTO movie(id, title, alt,status, tag_date, original_title, aka, subtype, languages, '
                        'year, durations, current_season, episodes_count, seasons_count, last_update, archived) '
@@ -344,13 +344,11 @@ class VideoManager:
     def update_movie(self, subject_id: int, ignore_none=True, **kwargs):
         params = {}
         for k, v in kwargs.items():
-            if k in ['title', 'alt', 'status', 'tag_date', 'original_title', 'aka', 'subtype', 'languages', 'year', 'durations',
-                     'current_season', 'episodes_count', 'seasons_count', 'archived', 'location', 'source'] \
-                    and (not ignore_none or (ignore_none and v is not None)):
+            if not ignore_none or v is not None:
                 params[k] = v
         if not params or len(params) == 0:
             raise ValueError('No params to update')
-        con = self.__connection
+        con = self.connection
         cursor = con.cursor()
         cursor.execute('UPDATE movie SET last_update=DATETIME(\'now\'), %s WHERE id = %d'
                        % (', '.join(['%s = :%s' % (k, k) for k in params]), subject_id), params)
@@ -361,16 +359,32 @@ class VideoManager:
         con.commit()
         return True
 
+    def get_movies(self, order_by=None, desc=False, ignore_blank=False, **params):
+        cursor = self.__select_movie(order_by=order_by, desc=desc, ignore_blank=ignore_blank, **params)
+        return [dict(x) for x in cursor.fetchall()]
+
     def get_movie(self, **params):
-        cursor = self.__connection.cursor()
-        if not params or len(params) == 0:
-            cursor.execute('SELECT * FROM movie')
-        else:
-            cursor.execute('SELECT * FROM movie WHERE %s' % (' AND '.join(['%s = :%s' % (k, k) for k in params])), params)
+        cursor = self.__select_movie(**params)
         r = cursor.fetchone()
         if r:
             return dict(r)
         return None
+
+    def __select_movie(self, order_by=None, desc=False, ignore_blank=False, **params):
+        sql = 'SELECT * FROM movie'
+        if ignore_blank:
+            for k, v in params.copy().items():
+                if v is None or v == '':
+                    del params[k]
+        if params and len(params) > 0:
+            sql += ' WHERE %s' % (' AND '.join(['%s = :%s' % (k, k) for k in params]))
+        if order_by:
+            sql += ' ORDER BY %s' % order_by
+        if desc:
+            sql += ' DESC'
+        cursor = self.connection.cursor()
+        cursor.execute(sql, params)
+        return cursor
 
 
 def get_duration(filepath):

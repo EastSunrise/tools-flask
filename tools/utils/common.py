@@ -56,3 +56,28 @@ def cmp_strings(strings: list):
                 last_common = True
             commons[-1] += first_str[i]
     return commons, diff
+
+
+class BaseEnum:
+
+    def __init__(self, code: int, title: str) -> None:
+        self.code = code
+        self.title = title
+
+
+def from_name(name, t):
+    for n, m in t.__members__.items():
+        if n == name:
+            return m
+    return None
+
+
+def from_code(code, t):
+    for m in t.__members__.values():
+        if m.code == code:
+            return m
+    return None
+
+
+def display_enums(t):
+    return [(n, m.value.title) for n, m in t.__members__.items()]

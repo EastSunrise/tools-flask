@@ -21,15 +21,8 @@ def create_app(config_file, db):
     )
     app.config.from_pyfile(os.path.join(app.instance_path, config_file))
 
-    from tools.config import init_logging
-    init_logging(app)
-
-    @app.route('/hello')
-    def hello():
-        return 'Hello!'
-
-    from tools import database
-    database.init_app(app)
+    from tools.config import init_logging, init_app
+    init_app(app)
 
     from tools import video
     app.register_blueprint(video.video_blu, url_prefix='/video')
