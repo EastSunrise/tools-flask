@@ -3,38 +3,32 @@
 @Author Kingen
 @Date 2020/5/12
 """
-import logging.config
 import os
 
-import yaml
 from flask import Flask
 
 
 def create_app(config_file, db):
     """
-    :param config_file: relative path to root_path
+    :param config_file: relative path to instance_path
     :return:
     """
     # app config
-    app = Flask(__name__, instance_relative_config=True)
+    app = Flask(__name__)
     app.config.from_mapping(
         SECRET_KEY='dev',
         DATABASE=os.path.join(app.instance_path, db),
     )
-    app.config.from_pyfile(config_file)
+    app.config.from_pyfile(os.path.join(app.instance_path, config_file))
 
-    # config for logging
-    if not os.path.exists('logs'):
-        os.mkdir('logs')
-    with open(r'tools/resources/logging.yml', 'r') as file:
-        config = yaml.load(file.read(), Loader=yaml.Loader)
-    logging.config.dictConfig(config)
+    from tools.config import init_logging
+    init_logging(app)
 
     @app.route('/hello')
     def hello():
         return 'Hello!'
 
-    from tools.settings import database
+    from tools import database
     database.init_app(app)
 
     from tools import video
