@@ -9,10 +9,10 @@ import math
 import os
 import re
 from itertools import groupby
-from operator import itemgetter
 from sqlite3 import connect, PARSE_DECLTYPES, Row
 from urllib import parse
 
+import pythoncom
 from pymediainfo import MediaInfo
 
 from tools.internet.downloader import IDM, Thunder
@@ -30,6 +30,8 @@ standard_kbps = 2500  # kb/s
 class VideoManager:
     CHINESE = ['汉语普通话', '普通话', '粤语', '闽南语', '河南方言', '贵州方言', '贵州独山话']
     JUNK_SITES = ['yutou.tv', '80s.la', '80s.im', '2tu.cc', 'bofang.cc:', 'dl.y80s.net', '80s.bz', 'xubo.cc']
+    ALL_SITES = [VideoSearch80s(), VideoSearchXl720(), VideoSearchXLC(),
+                 VideoSearchZhandi(), VideoSearchAxj(), VideoSearchHhyyk(), VideoSearchMP4()]
 
     def __init__(self, cdn, db_path, idm_path='IDM.exe') -> None:
         self.cdn = cdn
@@ -62,6 +64,19 @@ class VideoManager:
 
     def search_resources(self, subject_id: int):
         """
+        :return: sites and resources found
+        """
+        subject = self.get_movie(id=subject_id)
+        if subject is None:
+            logger.info('No subject found with id: %d', subject_id)
+            return {}
+        resources = {}
+        for site in sorted(self.ALL_SITES, key=lambda x: x.priority):
+            resources[site.name] = site.search(subject)
+        return resources
+
+    def collect_resources(self, subject_id: int):
+        """
         Search and download resources for subject specified by id.
         :param subject_id:
         :return: archived
@@ -70,9 +85,7 @@ class VideoManager:
         if subject is None:
             logger.info('No subject found with id: %d', subject_id)
             return 'none'
-        all_sites = [VideoSearch80s(), VideoSearchXl720(), VideoSearchXLC(),
-                     VideoSearchZhandi(), VideoSearchAxj(), VideoSearchHhyyk(), VideoSearchMP4()]
-        return self.__collect_subject(subject, all_sites)
+        return self.__collect_subject(subject, self.ALL_SITES)
 
     def archive_temp(self, subject_id):
         """
@@ -120,7 +133,7 @@ class VideoManager:
         if subtype == 'movie':
             links = {'http': {}, 'ed2k': {}, 'pan': {}, 'ftp': {}, 'magnet': {}, 'torrent': {}, 'unknown': {}}
             for site in sorted(sites, key=lambda x: x.priority):
-                for url, remark in site.search(subject).items():
+                for url, remark in site.collect(subject).items():
                     p, u = classify_url(url)
                     if any([u.find(x) >= 0 for x in self.JUNK_SITES]):
                         continue
@@ -143,12 +156,12 @@ class VideoManager:
                     if weight_video(ext, subject['durations'], size) < 0:
                         continue
                     links[p][u] = (u, filename, ext)
-
             url_count = 0
             for u, filename, ext in links['http'].values():
                 logger.info('Add IDM task of %s, downloading from %s to the temporary dir', title, u)
                 self.__idm.add_task(u, self.__temp_dir, '%d_%s_http_%d_%s' % (subject_id, title, url_count, filename))
                 url_count += 1
+            pythoncom.CoInitialize()
             thunder = Thunder()
             for p in ['ed2k', 'ftp']:
                 for u, filename, ext in links[p].values():
@@ -156,6 +169,7 @@ class VideoManager:
                     thunder.add_task(u, '%d_%s_%s_%d_%s' % (subject_id, title, p, url_count, filename))
                     url_count += 1
             thunder.commit_tasks()
+            pythoncom.CoUninitialize()
 
             if url_count == 0:
                 logger.warning('No resources found for: %s', title)
@@ -168,7 +182,7 @@ class VideoManager:
             episodes_count = subject['episodes_count']
             links = {'http': [], 'ed2k': [], 'pan': [], 'ftp': [], 'magnet': [], 'torrent': [], 'unknown': []}
             for site in sorted(sites, key=lambda x: x.priority):
-                for url, remark in site.search(subject).items():
+                for url, remark in site.collect(subject).items():
                     p, u = classify_url(url)
                     if any([u.find(x) >= 0 for x in self.JUNK_SITES]):
                         continue
@@ -189,6 +203,7 @@ class VideoManager:
                 self.update_movie(subject_id, archived='none')
                 return 'none'
             logger.info('Add IDM tasks of %s, %d episodes', title, episodes_count)
+            path = os.path.join(path, filename)
             os.makedirs(path, exist_ok=True)
             episode = 'E%%0%dd%%s' % math.ceil(math.log10(episodes_count + 1))
             for i, url in enumerate(urls):
@@ -204,81 +219,88 @@ class VideoManager:
             h = '%s://%s' % (t, h)
             r['head'], r['path'] = h, p
         urls = [None] * (episodes_count + 1)
-        for length, xs in groupby(sorted(http_resources, key=lambda x: len(x['path'])), key=lambda x: len(x['path'])):
-            for head, ys in groupby(sorted(xs, key=lambda x: x['head']), key=lambda x: x['head']):
-                rs = list(ys)
-                if len(rs) == 1:
-                    p0 = rs[0]['path']
-                    if os.path.splitext(p0)[0].endswith('%dend' % episodes_count):
-                        url0 = rs[0]['head'] + p0
-                        c, msg, args = pre_download(url0)
-                        if c == 200:
-                            urls[episodes_count] = url0
+        # resource keys: url, head, path
+        for length, rs_sort_len in groupby(sorted(http_resources, key=lambda x: len(x['path'])), key=lambda x: len(x['path'])):
+            for head, rs_sort_head in groupby(sorted(rs_sort_len, key=lambda x: x['head']), key=lambda x: x['head']):
+                rs_sorted = list(rs_sort_head)
+
+                # path like: *{episodes_count}end.mp4
+                if len(rs_sorted) == 1:
+                    r0 = rs_sorted[0]
+                    if os.path.splitext(r0['path'])[0].endswith('%dend' % episodes_count):
+                        if pre_download(r0['url'])[0] == 200:
+                            urls[episodes_count] = r0['url']
                     continue
-                commons, ds = cmp_strings([r['path'] for r in rs])
-                for i, c in enumerate(commons[:-1]):
-                    ed = re.search(r'\d+$', c)
+
+                # extract pattern of similar urls
+                commons, differences = cmp_strings([x['path'] for x in rs_sorted])
+                for i, x in enumerate(commons[:-1]):
+                    ed = re.search(r'\d+$', x)
                     if ed is not None:
-                        commons[i] = c[:ed.start()]
-                        for d in ds:
-                            d[i] = c[ed.start():] + d[i]
-                for i, c in enumerate(commons[1:]):
-                    sd = re.search(r'^\d+', c)
+                        commons[i] = x[:ed.start()]
+                        for y in differences:
+                            y[i] = x[ed.start():] + y[i]
+                for i, x in enumerate(commons[1:]):
+                    sd = re.search(r'^\d+', x)
                     if sd is not None:
-                        commons[i] = c[sd.end():]
-                        for d in ds:
-                            d[i] = d[i] + c[:sd.end()]
+                        commons[i] = x[sd.end():]
+                        for y in differences:
+                            y[i] = y[i] + x[:sd.end()]
                 del_count = 0
-                for i, c in enumerate(commons[1:-1]):
-                    if c == '':
-                        for d in ds:
-                            d[i] = d[i] + c + d[i + 1]
-                            del d[i + 1 - del_count]
+                for i, x in enumerate(commons[1:-1]):
+                    if x == '':
+                        for y in differences:
+                            y[i] = y[i] + x + y[i + 1]
+                            del y[i + 1 - del_count]
                         del commons[i + 1 - del_count]
                         del_count += 1
-                if any((not d[-1].isdigit() or int(d[-1]) > episodes_count) for d in ds):
+
+                # exclude if number of differences is > 2 or differences aren't digit or the digit is over count if episodes.
+                if any((not x[-1].isdigit() or int(x[-1]) > episodes_count) for x in differences):
                     continue
-                if any((len(d) > 2 or not d[0].isdigit()) for d in ds):
+                if any((len(x) > 2 or not x[0].isdigit()) for x in differences):
                     continue
-                gs = {}  # format-episodes
-                if any(len(set(d)) > 1 for d in ds):
-                    phs = 1
-                    for k, es in groupby(sorted(ds, key=itemgetter(0)), key=lambda x: d[0]):
-                        es = [d[-1] for d in es]
-                        pf = commons[0] + k + '%d'.join(commons[1:])
-                        gs[pf] = gs.get(pf, []) + es
-                else:
-                    phs = len(ds[0])
+
+                gs = {}  # path_format: episodes_list
+                # two parts of differences, first one as key to group, second one as episode
+                if any(len(set(x)) > 1 for x in differences):
+                    placeholder_count = 1
+                    for first, episodes_grouped in groupby(sorted(differences, key=lambda x: x[0]), key=lambda x: x[0]):
+                        pf = commons[0] + first + '%d'.join(commons[1:])
+                        gs[pf] = gs.get(pf, []) + [x[-1] for x in episodes_grouped]
+                else:  # all differences represent episode
+                    placeholder_count = len(differences[0])
                     pf = '%d'.join(commons)
-                    gs[pf] = gs.get(pf, []) + [d[0] for d in ds]
-                for pf, es in gs.items():
-                    uf = head + pf
-                    els = [len(e) for e in es]
-                    min_d = min(els)
-                    if min_d == max(els):
-                        uf = uf.replace('%d', '%%0%dd' % min_d)
-                    es = [int(e) for e in es]
-                    start, end = min(es), max(es)
+                    gs[pf] = gs.get(pf, []) + [x[0] for x in differences]
+                for path_format, episodes in gs.items():
+                    url_format = head + path_format
+                    episodes_len = [len(x) for x in episodes]
+                    min_len = min(episodes_len)
+                    # fixed length
+                    if min_len == max(episodes_len):
+                        url_format = url_format.replace('%d', '%%0%dd' % min_len)
+                    episodes_int = [int(x) for x in episodes]
+                    start, end = min(episodes_int), max(episodes_int)
 
                     # compute bounds of episodes
-                    code_s, msg, args = pre_download(uf % tuple([1] * phs), pause=3)
+                    code_s, msg, args = pre_download(url_format % tuple([1] * placeholder_count), pause=3)
                     if code_s == 200:
                         start = 1
                     else:
-                        left = self.__compute_limit(2, start, uf, phs, True)
+                        left = self.__compute_limit(2, start, url_format, placeholder_count, True)
                         if left > start:
                             continue
                         start = left
-                    code_e, msg, args = pre_download(uf % tuple([episodes_count] * phs), pause=3)
+                    code_e, msg, args = pre_download(url_format % tuple([episodes_count] * placeholder_count), pause=3)
                     if code_e == 200:
                         end = episodes_count + 1
                     else:
-                        left = self.__compute_limit(end, episodes_count - 1, uf, phs, False)
+                        left = self.__compute_limit(end, episodes_count - 1, url_format, placeholder_count, False)
                         if left <= end:
                             continue
                         end = left
                     for i in range(start, end):
-                        urls[i] = uf % tuple([i] * phs)
+                        urls[i] = url_format % tuple([i] * placeholder_count)
         return urls[1:]
 
     @staticmethod
@@ -359,7 +381,7 @@ class VideoManager:
         con.commit()
         return True
 
-    def get_movies(self, order_by=None, desc=False, ignore_blank=False, **params):
+    def get_movies(self, order_by=None, desc='asc', ignore_blank=False, **params):
         cursor = self.__select_movie(order_by=order_by, desc=desc, ignore_blank=ignore_blank, **params)
         return [dict(x) for x in cursor.fetchall()]
 
@@ -370,7 +392,7 @@ class VideoManager:
             return dict(r)
         return None
 
-    def __select_movie(self, order_by=None, desc=False, ignore_blank=False, **params):
+    def __select_movie(self, order_by=None, desc='asc', ignore_blank=False, **params):
         sql = 'SELECT * FROM movie'
         if ignore_blank:
             for k, v in params.copy().items():
@@ -380,8 +402,8 @@ class VideoManager:
             sql += ' WHERE %s' % (' AND '.join(['%s = :%s' % (k, k) for k in params]))
         if order_by:
             sql += ' ORDER BY %s' % order_by
-        if desc:
-            sql += ' DESC'
+            if desc.lower() == 'desc':
+                sql += ' DESC'
         cursor = self.connection.cursor()
         cursor.execute(sql, params)
         return cursor

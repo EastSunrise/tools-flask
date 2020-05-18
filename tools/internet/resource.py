@@ -51,7 +51,23 @@ class VideoSearch(metaclass=abc.ABCMeta):
     def home(self):
         return self._scheme + '://' + self._netloc + '/'
 
-    def search(self, subject, manual=False):
+    def search(self, subject):
+        logger.info('Searching: %s, for: %s', self.name, subject['title'])
+        keys, matches = self._get_possible_titles(subject)
+        resources = []
+        for key in keys:
+            try:
+                self._next_access(15)
+                soup = get_soup(self._search_req(key, subtype=subject['subtype']), timeout=self._timeout)
+                for r in self._find_resources(soup, subtype=subject['subtype']):
+                    resources.append((r['name'], self._get_full_url(r['href'])))
+            except socket.timeout:
+                continue
+            except ConnectionResetError:
+                continue
+        return resources
+
+    def collect(self, subject, manual=False):
         """
         There are four steps to search resources:
         1. search resources by a specific key
@@ -59,7 +75,7 @@ class VideoSearch(metaclass=abc.ABCMeta):
         3. access to pages of resources to get specific urls
         :return: {url: remark, ...}
         """
-        logger.info('Searching: %s, for: %s', self.name, subject['title'])
+        logger.info('Collecting: %s, for: %s', self.name, subject['title'])
         keys, matches = self._get_possible_titles(subject)
         exact_resources, urls = [], {}
         for key in keys:

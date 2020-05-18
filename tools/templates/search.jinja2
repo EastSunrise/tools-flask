@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Search</title>
+</head>
+<body>
+<div>
+    <ul>
+        {% for site, rs in resources.items() %}
+            <li>
+                <span>{{ site }}</span>
+                <ul>
+                    {% for name, url in rs %}
+                        <li>
+                            <a href="{{ url }}" target="_blank">{{ name }}</a>
+                        </li>
+                    {% endfor %}
+                </ul>
+            </li>
+        {% endfor %}
+    </ul>
+</div>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+</body>
+</html>

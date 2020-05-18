@@ -21,3 +21,8 @@ class Archived(Enum):
     playable = BaseEnum(1, '可播放')
     idm = BaseEnum(2, 'IDM')
     downloading = BaseEnum(3, '下载中')
+
+
+class Subtype(Enum):
+    movie = BaseEnum(0, '电影')
+    tv = BaseEnum(1, '电视剧')

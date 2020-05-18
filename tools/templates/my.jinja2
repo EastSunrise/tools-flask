@@ -3,42 +3,74 @@
 <head>
     <meta charset="UTF-8">
     <title>My Movies</title>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='my.css') }}"/>
 </head>
 <body>
 <div>
-    <form id="form" action="{{ url_for('video.my_movies') }}" method="get">
-        <label for="archived">归档</label>
-        <select id="archived" class="filter" name="archived">
-            <option value="" {% if archived is blank %}selected="selected"{% endif %}>所有</option>
-            {% for value, title in archived_iter %}
-                <option value="{{ value }}"
-                        {% if archived == value %}selected="selected"{% endif %}>{{ title }}</option>
+    <div>
+        <form id="form" action="{{ url_for('video.my_movies') }}" method="get">
+            {% for k, title in [('archived', '归档'), ('status','状态'), ('subtype', '类型')] %}
+                <label> {{ title }}：
+                    <select class="filter" name="{{ k }}">
+                        <option value=""{% if params[k] is blank %} selected="selected"{% endif %}>所有</option>
+                        {% for name, member in members[k].items() %}
+                            <option value="{{ name }}"{% if params[k] == name %} selected="selected"{% endif %}>
+                                {{ member.value.title }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </label>
             {% endfor %}
-        </select>
-        <label for="status">类型</label>
-        <select id="status" class="filter" name="status">
-            <option value="" {% if status is blank %}selected="selected"{% endif %}>所有</option>
-            {% for value, title in status_iter %}
-                <option value="{{ value }}"
-                        {% if status == value %}selected="selected"{% endif %}>{{ title }}</option>
-            {% endfor %}
-        </select>
-        <label for="order_by">排序</label>
-        <select id="order_by" class="filter" name="order_by">
-            {% for value, title in order_by_iter %}
-                <option value="{{ value }}"
-                        {% if order_by == value %}selected="selected"{% endif %}>{{ title }}</option>
-            {% endfor %}
-        </select>
-    </form>
-    <ul id="subjects">
-        {% for subject in subjects %}
-            <li id="{{ subject['id'] }}" title="{{ subject['title'] }}">
-                <a href="{{ subject['alt'] }}" target="_blank">{{ subject['title'] }} {{ subject['original_title'] }}
-                    ({{ subject['year'] }})</a>
-            </li>
-        {% endfor %}
-    </ul>
+            <input type="hidden" id="order_by" name="order_by" value="{{ params['order_by'] }}"/>
+            <input type="hidden" id="desc" name="desc" value="{{ params['desc'] }}"/>
+            <span class="page">共{{ subjects | length }}条</span>
+        </form>
+    </div>
+    <div>
+        {% if subjects | length == 0 %}
+            <div>
+                <span>Nothing</span>
+            </div>
+        {% else %}
+            <table id="subjects">
+                <thead>
+                <tr>
+                    {% for id, title in [('id', 'ID'), ('title', '名称'), ('year', '年份'), ('archived', '归档'),
+                    ('status', '标记'), ('tag_date', '标记时间'), ('last_update', '更新时间'), ] %}
+                        <th class="sortable" id="{{ id }}">{{ title }}<span class="arrow"></span></th>
+                    {% endfor %}
+                    <th>搜索</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for subject in subjects %}
+                    <tr id="{{ subject['id'] }}">
+                        <td>{{ subject['id'] }}</td>
+                        <td>
+                            <a href="{{ subject['alt'] }}" target="_blank">
+                                {{ subject['title'] }}
+                            </a>
+                        </td>
+                        <td>{{ subject['year'] }}</td>
+                        <td>
+                            <span class="clickTip" hidden="hidden"></span>
+                            <a class="playBtn" href="javascript:void(0)" data-archived="{{ subject['archived'] }}"
+                               data-id="{{ subject['id'] }}">
+                                {{ members['archived'][subject['archived']].value.title }}
+                            </a>
+                        </td>
+                        <td>{{ members['status'][subject['status']].value.title }}</td>
+                        <td>{{ subject['tag_date'] or '' }}</td>
+                        <td>{{ subject['last_update'] }}</td>
+                        <td>
+                            <a href="{{ url_for('video.search') }}?id={{ subject['id'] }}" target="_blank">搜索</a>
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+    </div>
 </div>
 <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
 <script type="text/javascript" src="{{ url_for('static', filename='my.js') }}"></script>

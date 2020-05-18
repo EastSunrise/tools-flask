@@ -12,8 +12,7 @@ from flask_cors import cross_origin
 
 from instance.private import video_cdn, idm_path, douban_api_key, Cookie, video_db
 from tools.internet.douban import Douban
-from tools.utils.common import display_enums
-from tools.video.enums import Status, Archived
+from tools.video.enums import Status, Archived, Subtype
 from .manager import VideoManager
 
 video_blu = Blueprint('video', __name__, url_prefix='/video')
@@ -27,17 +26,18 @@ douban = Douban(douban_api_key)
 
 @video_blu.route('/my')
 def my_movies():
-    params = {
-        'archived': request.args.get('archived'),
-        'status': request.args.get('status'),
-        'order_by': request.args.get('order_by', default='last_update')
-    }
-    if params['order_by'] == 'last_update' or params['order_by'] == 'tag_date':
-        params['desc'] = True
+    params = request.args.copy()
+    params['order_by'] = request.args.get('order_by', default='last_update')
+    params['desc'] = request.args.get(
+        'desc', default=('desc' if params['order_by'] == 'last_update' or params['order_by'] == 'tag_date' else 'asc'))
     subjects = manager().get_movies(ignore_blank=True, **params)
     return render_template(
-        'my.jinja2', subjects=subjects, **params, archived_iter=display_enums(Archived), status_iter=display_enums(Status),
-        order_by_iter=[('last_update', '更新时间'), ('title', '标题'), ('tag_date', '标记时间')]
+        'my.jinja2', subjects=subjects, params=params,
+        members={
+            'archived': Archived.__members__,
+            'status': Status.__members__,
+            'subtype': Subtype.__members__
+        }
     )
 
 
@@ -82,11 +82,17 @@ def add():
 
 
 @video_blu.route('/search')
-@cross_origin(origins=origins)
 def search():
     subject_id = request.args.get('id', type=int)
+    return render_template('search.jinja2', resources=manager().search_resources(subject_id))
+
+
+@video_blu.route('/collect')
+@cross_origin(origins=origins)
+def collect():
+    subject_id = request.args.get('id', type=int)
     return {
-        'archived': manager().search_resources(subject_id)
+        'archived': manager().collect_resources(subject_id)
     }
 
 

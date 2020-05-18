@@ -35,6 +35,8 @@ def cmp_strings(strings: list):
     """
     compare at least 2 strings with same length.
     :return: list of common parts, lists of different parts for string in strings separately
+        For example, ['abc02lkj', 'abd04kjj']
+        return ['ab', '0', 'j'], [['c', '2lk'], ['d', '4kj']]
     """
     if strings is None or len(strings) < 2 or any((x is None or len(x) == 0 or len(x) != len(strings[0])) for x in strings):
         raise ValueError
@@ -77,7 +79,3 @@ def from_code(code, t):
         if m.code == code:
             return m
     return None
-
-
-def display_enums(t):
-    return [(n, m.value.title) for n, m in t.__members__.items()]
