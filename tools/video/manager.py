@@ -20,6 +20,7 @@ from tools.internet.resource import VideoSearch80s, VideoSearchXl720, VideoSearc
 from tools.internet.spider import pre_download
 from tools.utils import file
 from tools.utils.common import cmp_strings
+from tools.video import Archived
 
 logger = logging.getLogger(__name__)
 
@@ -87,14 +88,34 @@ class VideoManager:
             return 'none'
         return self.__collect_subject(subject, self.ALL_SITES)
 
+    def archive(self, subject_id):
+        subject = self.get_movie(id=subject_id)
+        archived = self.__archived(subject)
+        if archived:
+            self.update_movie(subject_id, archived=Archived.playable.name, location=archived)
+            return Archived.playable.name
+        self.update_movie(subject_id, archived=Archived.none.name)
+        return Archived.none.name
+
     def archive_temp(self, subject_id):
         """
         After finishing all IDM and Thunder tasks.
         :return: -2: IOError, -1: no qualified file, 1: archived
         """
-        paths = [os.path.join(self.__temp_dir, x) for x in os.listdir(self.__temp_dir) if x.startswith(str(subject_id))]
         subject = self.get_movie(id=subject_id)
+        if subject['archived'] == Archived.idm.name:
+            archived = self.__archived(subject)
+            if archived:
+                self.update_movie(subject_id, archived=Archived.playable.name, location=archived)
+                return Archived.playable.name
+            self.update_movie(subject_id, archived=Archived.none.name)
+            return Archived.none.name
+
         weights = {}
+        paths = [os.path.join(self.__temp_dir, x) for x in os.listdir(self.__temp_dir) if x.startswith(str(subject_id))]
+        if len(paths) == 0:
+            self.update_movie(subject_id, archived=Archived.none.name)
+            return Archived.none.name
         for path in paths:
             try:
                 weights[path] = weight_video_file(path, subject['durations'])
@@ -104,8 +125,8 @@ class VideoManager:
         chosen = max(weights, key=lambda x: weights[x])
         if weights[chosen] < 0:
             logger.warning('No qualified video file: %s', subject['title'])
-            self.update_movie(subject_id, archived='none')
-            return 'none'
+            self.update_movie(subject_id, archived=Archived.none.name)
+            return Archived.none.name
         else:
             logger.info('Chosen file: %.2f, %s', weights[chosen], chosen)
             ext = os.path.splitext(chosen)[1]
@@ -116,8 +137,8 @@ class VideoManager:
                 return -2
         for p in weights:
             file.del_to_recycle(p)
-        self.update_movie(subject_id, archived='playable', location=dst)
-        return 'playable'
+        self.update_movie(subject_id, archived=Archived.playable.name, location=dst)
+        return Archived.playable.name
 
     def __collect_subject(self, subject, sites):
         subject_id, title, subtype = subject['id'], subject['title'], subject['subtype']
@@ -213,6 +234,9 @@ class VideoManager:
             return 'idm'
 
     def __extract_tv_urls(self, http_resources, episodes_count):
+        with open('tv.txt', 'a', encoding='utf-8') as fp:
+            for x in http_resources:
+                fp.write(x['url'] + '\n')
         for r in http_resources:
             t, s = parse.splittype(r['url'])
             h, p = parse.splithost(s)
@@ -220,8 +244,8 @@ class VideoManager:
             r['head'], r['path'] = h, p
         urls = [None] * (episodes_count + 1)
         # resource keys: url, head, path
-        for length, rs_sort_len in groupby(sorted(http_resources, key=lambda x: len(x['path'])), key=lambda x: len(x['path'])):
-            for head, rs_sort_head in groupby(sorted(rs_sort_len, key=lambda x: x['head']), key=lambda x: x['head']):
+        for length, rs_sort_len in groupby(sorted(http_resources, key=lambda z: len(z['path'])), key=lambda z: len(z['path'])):
+            for head, rs_sort_head in groupby(sorted(rs_sort_len, key=lambda z: z['head']), key=lambda z: z['head']):
                 rs_sorted = list(rs_sort_head)
 
                 # path like: *{episodes_count}end.mp4
@@ -265,7 +289,7 @@ class VideoManager:
                 # two parts of differences, first one as key to group, second one as episode
                 if any(len(set(x)) > 1 for x in differences):
                     placeholder_count = 1
-                    for first, episodes_grouped in groupby(sorted(differences, key=lambda x: x[0]), key=lambda x: x[0]):
+                    for first, episodes_grouped in groupby(sorted(differences, key=lambda z: z[0]), key=lambda z: z[0]):
                         pf = commons[0] + first + '%d'.join(commons[1:])
                         gs[pf] = gs.get(pf, []) + [x[-1] for x in episodes_grouped]
                 else:  # all differences represent episode

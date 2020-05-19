@@ -1,3 +1,50 @@
+archiveMap = {
+    added: {
+        code: 0, text: '已添加', title: '点击搜索', func: function (_this, subject_id) {
+            getJSON(_this, 'http://localhost:5000/video/collect?id=' + subject_id, '正在搜索', function (result) {
+                updateArchived(_this, result['archived'], subject_id);
+            });
+        }
+    },
+    playable: {
+        code: 1, text: '可播放', title: '点击播放', func: function (_this, subject_id) {
+            getJSON(_this, 'http://localhost:5000/video/play?id=' + subject_id, '正在启动', function (result) {
+                if (!result.success) {
+                    alert('无法播放');
+                }
+                updateArchived(_this, 'playable', subject_id);
+            });
+        }
+    },
+    idm: {
+        code: 2, text: 'IDM', title: '点击归档', func: function (_this, subject_id) {
+            let yOrN = confirm('全部下载完成？');
+            if (yOrN) {
+                getJSON(_this, 'http://localhost:5000/video/archive?id=' + subject_id, '正在归档', function (result) {
+                    updateArchived(_this, result['archived'], subject_id);
+                })
+            }
+        }
+    },
+    downloading: {
+        code: 3, text: '下载中', title: '点击归档', func: function (_this, subject_id) {
+            let yOrN = confirm('全部下载完成？');
+            if (yOrN) {
+                getJSON(_this, 'http://localhost:5000/video/temp?id=' + subject_id, '正在归档', function (result) {
+                    let a = result['archived'];
+                    if (a === -2) {
+                        alert('I/O错误');
+                        updateArchived(_this, 'downloading', subject_id);
+                    } else {
+                        updateArchived(_this, a, subject_id);
+                    }
+                })
+            }
+        }
+    },
+};
+
+
 (function () {
     $('.filter').on('change', function () {
         $('#form').submit();
@@ -31,55 +78,23 @@
     })
 })();
 
-
 function updateArchived(_this, archived, subject_id) {
-    let playBtn = $(_this);
-    let func;
-    if (archived === 'added') {
-        playBtn.attr('title', '点击搜索');
-        func = function () {
-            getJSON(_this, 'http://localhost:5000/video/collect?id=' + subject_id, '正在搜索', function (result) {
-                updateArchived(_this, result['archived'], subject_id);
-            });
-        };
-    } else if (archived === 'playable') {
-        playBtn.attr('title', '点击播放');
-        func = function () {
-            getJSON(_this, 'http://localhost:5000/video/play?id=' + subject_id, '正在启动', function (result) {
-                if (!result.success) {
-                    alert('无法播放');
-                }
-                updateArchived(_this, archived, subject_id);
-            })
-        };
-    } else if (archived === 'idm' || archived === 'downloading') {
-        playBtn.attr('title', '点击归档');
-        func = function () {
-            let yOrN = confirm('全部下载完成？');
-            if (yOrN) {
-                getJSON(_this, 'http://localhost:5000/video/temp?id=' + subject_id, '正在归档', function (result) {
-                    let a = result['archived'];
-                    if (a === -2) {
-                        alert('I/O错误');
-                        updateArchived(_this, archived, subject_id);
-                    } else {
-                        updateArchived(_this, a, subject_id);
-                    }
-                })
-            }
-        };
+    if (archiveMap.hasOwnProperty(archived)) {
+        let value = archiveMap[archived];
+        _this.text(value['text']);
+        _this.attr('title', value['title']);
+        _this.off('click').on('click', null, null, function () {
+            value['func'](_this, subject_id);
+        });
     } else {
-        playBtn.parent().prepend('<span>找不到资源！</span>');
-        playBtn.remove();
-    }
-    if (func) {
-        playBtn.off('click').on('click', null, null, func);
+        _this.parent().prepend('<span>找不到资源！</span>');
+        _this.remove();
     }
 }
 
 function getJSON(_this, url, tip, callback) {
-    $(_this).attr('hidden', true);
-    let clickTip = $(_this).prev();
+    _this.attr('hidden', true);
+    let clickTip = _this.prev();
     clickTip.text(tip);
     clickTip.attr('hidden', false);
     let spotCount = 0;
@@ -106,7 +121,7 @@ function getJSON(_this, url, tip, callback) {
             clickTip.text('无法连接到服务器！');
         },
         complete: function () {
-            $(_this).attr('hidden', false);
+            _this.attr('hidden', false);
             clearInterval(timer);
         }
     });

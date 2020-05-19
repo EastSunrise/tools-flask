@@ -19,7 +19,7 @@ video_blu = Blueprint('video', __name__, url_prefix='/video')
 
 logger = logging.getLogger(__name__)
 
-origins = ['https://movie.douban.com', 'http://localhost:63342']
+origins = ['https://movie.douban.com', 'http://localhost:63342', 'http://127.0.0.1:5000']
 
 douban = Douban(douban_api_key)
 
@@ -110,6 +110,14 @@ def play():
             os.startfile(os.path.join(location, os.listdir(location)[0]))
             return result(True)
     return result(False)
+
+
+@video_blu.route('/archive')
+@cross_origin(origins=origins)
+def archive():
+    return {
+        'archived': manager().archive(request.args.get('id', type=int))
+    }
 
 
 @video_blu.route('/temp')
