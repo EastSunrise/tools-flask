@@ -75,7 +75,43 @@ archiveMap = {
 
     $('.playBtn').each(function () {
         updateArchived($(this), $(this).data('archived'), $(this).data('id'));
-    })
+    });
+
+    let selectedSpan = $('#selectedCount');
+    $('#selectAll').on('click', function () {
+        let checked = $(this).prop('checked');
+        $('.batchSelect').prop('checked', checked);
+        if (checked) {
+            selectedSpan.text($('#totalCount').text());
+        } else {
+            selectedSpan.text(0);
+        }
+    });
+
+    $('.batchSelect').on('click', function () {
+        let checked = $(this).prop('checked');
+        let selectCount = parseInt(selectedSpan.text());
+        if (checked) {
+            let all_checked = true;
+            $('.batchSelect').each(function () {
+                if (!$(this).prop('checked')) {
+                    all_checked = false;
+                }
+            });
+            $('#selectAll').prop('checked', all_checked);
+            selectCount++;
+        } else {
+            $('#selectAll').prop('checked', false);
+            selectCount--;
+        }
+        selectedSpan.text(selectCount);
+    });
+
+    $('#archiveBtn').on('click', function () {
+        $('.batchSelect:checked').each(function () {
+            // $(this).next('.archived').children('.playBtn').click();
+        });
+    });
 })();
 
 function updateArchived(_this, archived, subject_id) {

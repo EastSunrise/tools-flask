@@ -94,6 +94,8 @@ class Downloader:
     def cdn(self, cdn):
         if not os.path.isdir(cdn):
             self.__cdn = './'
+        else:
+            self.__cdn = cdn
 
     @property
     def bound_size(self):
@@ -113,10 +115,10 @@ class Downloader:
         if 1 < thread_count < 20:
             self.__thread_count = thread_count
 
-    def download(self, url, path='', filename=''):
+    def download(self, url, path='', filename='', multi_thread=False):
         """
-        Download a file by the url
-        Use multi threads to download if
+        Download a file from the url
+        :param url: unquoted
         :return: (code, msg)
         """
         if not os.path.isdir(path):
@@ -131,7 +133,7 @@ class Downloader:
             return code, msg
         total_size = args['size']
 
-        # single thread to download small files
+        # download small files
         if total_size <= self.bound_size:
             logger.info('Downloading from %s to %s', url, filepath)
             with open(filepath, 'wb') as fp:
@@ -140,6 +142,23 @@ class Downloader:
             logger.info('Success downloading: %s', filepath)
             return 200, 'OK'
 
+        # single thread
+        if not multi_thread:
+            logger.info('Downloading from %s to %s', url, filepath)
+            with open(filepath, 'wb') as fp:
+                with urlopen(Request(quote_url(url), headers=base_headers, method='GET')) as r:
+                    done_size = 0
+                    while True:
+                        block = r.read(self._DownloadThread.block_size)
+                        if block is None or len(block) == 0:
+                            break
+                        fp.write(block)
+                        done_size += len(block)
+                        print('\rDownloading: %.2f%%, %s/%s' % (done_size / total_size, self.__size2str(done_size), self.__size2str(total_size)), end='', flush=True)
+            logger.info('Success downloading: %s', filepath)
+            return 200, 'OK'
+
+        # todo too slowly
         thread_size = total_size // self._DownloadThread.block_size + 1
         threads = []
         for i in range(self.thread_count):
@@ -149,14 +168,15 @@ class Downloader:
             thread.start()
 
         queue = [(time.time(), 0)] * 10
+        time.sleep(0.1)
         total_size_str = self.__size2str(total_size)
         while not all([t.done for t in threads]):
             done_size = sum([t.done_size for t in threads])
             queue.pop(0)
             queue.append((time.time(), done_size))
             current_speed = (queue[-1][1] - queue[0][1]) / (queue[-1][0] - queue[0][0])
-            left_time = (total_size - done_size) // current_speed
-            print('\rDownloading: %s/s, %.2f%%, %s, %s' % (self.__size2str(current_speed), done_size / total_size, self.__time2str(left_time), total_size_str),
+            left_time_str = self.__time2str((total_size - done_size) // current_speed) if current_speed != 0 else 'No limit'
+            print('\rDownloading: %s/s, %.2f%%, %s, %s, %s' % (self.__size2str(current_speed), done_size / total_size, left_time_str, self.__size2str(done_size), total_size_str),
                   end='', flush=True)
             time.sleep(0.1)
 
@@ -181,11 +201,14 @@ class Downloader:
 
     class _DownloadThread(threading.Thread):
 
-        block_size = 1024
+        block_size = 4096  # 4KB
 
         def __init__(self, url, start: int, size: int, fp):
             super().__init__()
-            self.__url = url
+            self.__req = Request(quote_url(url), headers={
+                'Range': 'bytes=%d-%d' % (start, start + size),
+                **base_headers
+            }, method='GET')
             self.__fp = fp
             self.__fp.seek(start)
             self.__start = start
@@ -193,15 +216,17 @@ class Downloader:
             self.__done_size = 0
 
         def run(self) -> None:
-            with urlopen(self.__url) as response:
-                response.seek(self.__start)
-                while self.done < self.__size:
-                    block = response.read(self.block_size)
-                    if block is None or len(block) == 0:
-                        break
-                    self.__fp.write(block)
-                    self.__done_size += len(block)
-                self.__fp.close()
+            with urlopen(self.__req) as response:
+                if response.code == 206:
+                    while not self.done:
+                        block = response.read(self.block_size)
+                        if block is None or len(block) == 0:
+                            break
+                        self.__fp.write(block)
+                        self.__done_size += len(block)
+                    self.__fp.close()
+                else:
+                    logger.warning('No support for Range')
 
         @property
         def done_size(self):

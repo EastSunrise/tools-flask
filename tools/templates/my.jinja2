@@ -23,8 +23,11 @@
             {% endfor %}
             <input type="hidden" id="order_by" name="order_by" value="{{ params['order_by'] }}"/>
             <input type="hidden" id="desc" name="desc" value="{{ params['desc'] }}"/>
-            <span class="page">共{{ subjects | length }}条</span>
         </form>
+    </div>
+    <div>
+        共<span id="totalCount">{{ subjects | length }}</span>条，已选择<span id="selectedCount">0</span>条：
+        <input type="button" id="archiveBtn" value="批量归档"/>
     </div>
     <div>
         {% if subjects | length == 0 %}
@@ -35,6 +38,11 @@
             <table id="subjects">
                 <thead>
                 <tr>
+                    <th>
+                        <label>
+                            <input type="checkbox" id="selectAll"/>
+                        </label>
+                    </th>
                     {% for id, title in [('id', 'ID'), ('title', '名称'), ('year', '年份'), ('archived', '归档'),
                     ('status', '标记'), ('tag_date', '标记时间'), ('last_update', '更新时间'), ] %}
                         <th class="sortable" id="{{ id }}">{{ title }}<span class="arrow"></span></th>
@@ -45,14 +53,21 @@
                 <tbody>
                 {% for subject in subjects %}
                     <tr id="{{ subject['id'] }}">
-                        <td>{{ subject['id'] }}</td>
+                        <td>
+                            <label>
+                                <input type="checkbox" class="batchSelect"/>
+                            </label>
+                        </td>
+                        <td>
+                            {{ subject['id'] }}
+                        </td>
                         <td>
                             <a href="{{ subject['alt'] }}" target="_blank">
                                 {{ subject['title'] }}
                             </a>
                         </td>
                         <td>{{ subject['year'] }}</td>
-                        <td style="width: 120px">
+                        <td class="archived">
                             <span class="clickTip" hidden="hidden"></span>
                             <a class="playBtn" href="javascript:void(0)" data-archived="{{ subject['archived'] }}"
                                data-id="{{ subject['id'] }}">

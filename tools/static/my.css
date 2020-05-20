@@ -6,8 +6,12 @@ table tr th, table tr td {
     vertical-align: middle;
 }
 
-.sortable {
+table thead th.sortable {
     cursor: pointer;
+}
+
+table tbody td.archived {
+    width: 120px;
 }
 
 .arrow {
