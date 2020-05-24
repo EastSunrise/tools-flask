@@ -261,6 +261,7 @@ class VideoSearch80s(VideoSearch):
         return resources
 
     def _find_downs(self, soup):
+        # todo expand for tv
         links = {}
         for span in soup.find_all('span', {'class': 'dlname nm'}):
             down_a = span.span.a

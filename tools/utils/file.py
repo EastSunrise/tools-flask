@@ -19,14 +19,14 @@ def copy(src, dst):
     """
     if os.path.isfile(dst):
         logger.warning('File exists: %s', dst)
-        return 1
+        return 1, 'exists'
     src_md5 = get_md5(src)
     logger.info('Copy file from %s to %s', src, dst)
     shutil.copy2(src, dst)
     if get_md5(dst) != src_md5:
         logger.error('File corrupted while copying')
-        return 2
-    return 0
+        return 2, 'corrupted'
+    return 0, 'ok'
 
 
 def get_md5(path, block_size=st_blksize):

@@ -79,3 +79,14 @@ def from_code(code, t):
         if m.code == code:
             return m
     return None
+
+
+def fail(msg: str):
+    return {
+        'success': False,
+        'msg': msg
+    }
+
+
+def success(**kwargs):
+    return {'success': True, **kwargs}
