@@ -97,7 +97,7 @@ class VideoManager:
         for site in sorted(self.ALL_SITES, key=lambda x: x.priority):
             for url, remark in site.collect(subject).items():
                 p, u = classify_url(url)
-                if any([u.find(x) >= 0 for x in self.JUNK_SITES]):
+                if any([(x in u) for x in self.JUNK_SITES]):
                     continue
                 filename, ext, size = None, None, -1
                 if p == 'http':
@@ -421,12 +421,16 @@ def classify_url(url: str):
 
     :return: (protocol of url, decoded url)
     """
+    src = url
     if url.startswith('thunder://'):
         url = base64.b64decode(url[10:])
         try:
             url = url.decode('utf-8').strip('AAZZ')
         except UnicodeDecodeError:
-            url = url.decode('gbk').strip('AAZZ')
+            try:
+                url = url.decode('gbk').strip('AAZZ')
+            except UnicodeDecodeError:
+                return 'unknown', src
     url = parse.unquote(url.rstrip('/'))
 
     if 'pan.baidu.com' in url:
