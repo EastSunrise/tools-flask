@@ -33,7 +33,7 @@ class Douban:
         }
         self.__pause = pause
 
-    def collect_my_movies(self, my_id, cookie, start_date=START_DATE):
+    def collect_user_movies(self, my_id, start_date=START_DATE):
         """
         collect my movies data since start_date with cookie got manually.
         :return: {'<id>': {<simple-subject>},...}
@@ -43,7 +43,7 @@ class Douban:
             start = 0
             while True:
                 done = False
-                records = self.__parse_collections_page(my_id, cookie, catalog='movie', record_cat=record_cat, sort_by='time', start=start)
+                records = self.__parse_collections_page(my_id, catalog='movie', record_cat=record_cat, sort_by='time', start=start)
                 for subject in records['subjects']:
                     if subject['tag_date'] >= start_date:
                         subjects[subject['id']] = subject
@@ -83,17 +83,17 @@ class Douban:
 
         return movies
 
-    def movie_people_celebrities(self, user_id, cookie, start=0):
-        return self.__parse_creators_page(user_id, cookie, 'movie', start)
+    def movie_people_celebrities(self, user_id, start=0):
+        return self.__parse_creators_page(user_id, cat='movie', start=start)
 
-    def movie_people_wish_with_cookie(self, user_id, cookie, start=0):
-        return self.__parse_collections_page(user_id, cookie, 'movie', 'wish', start=start)
+    def movie_people_wish(self, user_id, start=0):
+        return self.__parse_collections_page(user_id, catalog='movie', record_cat='wish', start=start)
 
-    def movie_people_do_with_cookie(self, user_id, cookie, start=0):
-        return self.__parse_collections_page(user_id, cookie, 'movie', 'do', start=start)
+    def movie_people_do(self, user_id, start=0):
+        return self.__parse_collections_page(user_id, catalog='movie', record_cat='do', start=start)
 
-    def movie_people_collect_with_cookie(self, user_id, cookie, start=0):
-        return self.__parse_collections_page(user_id, cookie, 'movie', 'collect', start=start)
+    def movie_people_collect(self, user_id, start=0):
+        return self.__parse_collections_page(user_id, catalog='movie', record_cat='collect', start=start)
 
     def movie_subject(self, subject_id):
         return self.__get_result('/v2/movie/subject/{id}', {'id': subject_id})
@@ -218,19 +218,16 @@ class Douban:
             'count': count
         })
 
-    def __parse_creators_page(self, user_id, cookie, cat, start=0):
+    def __parse_creators_page(self, user_id, cat='movie', start=0):
         """
         :param user_id:
-        :param cookie:
         :param cat: movie/book/music
         :param start:
         :return:
         """
         catalogs = {'movie': 'celebrities', 'book': 'authors', 'music': 'musicians'}
         url = self.__get_url('/people/{id}/{cat}', cat, {'id': user_id, 'cat': catalogs[cat]}, {'start': start})
-        headers = {'Cookie': cookie}
-        headers.update(self.__headers)
-        soup = get_soup(Request(url, headers=headers, method='GET'), pause=self.__pause)
+        soup = get_soup(Request(url, headers=self.__headers, method='GET'), pause=self.__pause)
         results = []
         content = soup.find('div', id='content')
         for div in content.find('div', class_='article').find_all('div', class_='item'):
@@ -248,10 +245,9 @@ class Douban:
             'subjects': results
         }
 
-    def __parse_collections_page(self, user_id, cookie, catalog='movie', record_cat='wish', sort_by='time', start=0):
+    def __parse_collections_page(self, user_id, catalog='movie', record_cat='wish', sort_by='time', start=0):
         """
         Get user records with cookie
-        :param cookie: got through logging in manually
         :param user_id:
         :param catalog: movie/book/music/..
         :param record_cat: wish/do/collect
@@ -264,9 +260,7 @@ class Douban:
         """
         url = self.__get_url(path='/people/{id}/{cat}', netloc_cat=catalog, path_params={'id': user_id, 'cat': record_cat},
                              query_params={'sort': sort_by, 'start': start, 'mode': 'list'})
-        headers = {'Cookie': cookie}
-        headers.update(self.__headers)
-        soup = get_soup(Request(url, headers=headers, method='GET'), pause=self.__pause)
+        soup = get_soup(Request(url, headers=self.__headers, method='GET'), pause=self.__pause)
         results = []
         for li in soup.find('ul', class_='list-view').find_all('li'):
             div = li.div.div

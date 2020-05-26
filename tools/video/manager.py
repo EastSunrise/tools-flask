@@ -9,16 +9,18 @@ import math
 import os
 import re
 from sqlite3 import connect, PARSE_DECLTYPES, Row
-from urllib import parse
+from urllib import parse, error
 
 import pythoncom
 from pymediainfo import MediaInfo
 
+from tools.internet.douban import Douban
 from tools.internet.downloader import IDM, Thunder
-from tools.internet.resource import VideoSearch80s, VideoSearchXl720, VideoSearchXLC, VideoSearchZhandi, VideoSearchAxj, VideoSearchHhyyk, VideoSearchMP4
+from tools.internet.resource import VideoSearch80s, VideoSearchXl720, VideoSearchXLC, VideoSearchZhandi, \
+    VideoSearchAxj, VideoSearchHhyyk, VideoSearchMP4
 from tools.internet.spider import pre_download
 from tools.utils import file
-from tools.video import Archived
+from tools.video import Archived, Status, Subtype
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,9 @@ class VideoManager:
     JUNK_SITES = ['yutou.tv', '80s.la', '80s.im', '2tu.cc', 'bofang.cc:', 'dl.y80s.net', '80s.bz', 'xubo.cc']
     ALL_SITES = [VideoSearch80s(), VideoSearchXl720(), VideoSearchXLC(),
                  VideoSearchZhandi(), VideoSearchAxj(), VideoSearchHhyyk(), VideoSearchMP4()]
+    SOURCE_FIELDS = ['id', 'title', 'alt', 'status', 'tag_date', 'original_title', 'aka', 'subtype', 'languages', 'year',
+                     'durations', 'current_season', 'episodes_count', 'season_count']
+    FIELDS = SOURCE_FIELDS + ['archived', 'location', 'source', 'last_update']
 
     def __init__(self, cdn, db_path, idm_path='IDM.exe') -> None:
         self.cdn = cdn
@@ -62,6 +67,43 @@ class VideoManager:
     def close_connection(self):
         if self.__con is not None:
             self.__con.close()
+
+    def update_my_movies(self, douban: Douban, user_id, cookie, start_date=None):
+        """
+        Update my collected movies from Douban to database.
+
+        If not exist in db, get full info and insert into db, with archived set to 0.
+        If exists, update status and tag_date.
+
+        :param douban: an instance of Douban client
+        :param start_date: when tag_date start
+        """
+        subjects = self.get_movies()
+        ids = [m['id'] for m in subjects]
+        if start_date is None and len(subjects) > 0:
+            start_date = max([x['tag_date'] for x in subjects if x['tag_date'] is not None])
+        logger.info('Start updating movies since %s', start_date if start_date else '')
+        added_count = 0
+        for subject_id, subject in douban.collect_user_movies(user_id, start_date=start_date).items():
+            subject_id = int(subject_id)
+            try:
+                subject.update(douban.movie_subject(subject_id))
+            except error.HTTPError as e:
+                if e.code == 404:
+                    subject.update(douban.movie_subject_with_cookie(subject_id, cookie))
+                else:
+                    raise e
+            subject['title'] = remove_redundant_spaces(subject['title'])
+            subject['original_title'] = remove_redundant_spaces(subject['original_title'])
+            remove_redundant_spaces(subject['aka'])
+
+            if subject_id in ids:
+                self.update_movie(subject_id, **subject)
+            else:
+                if self.add_movie(subject):
+                    added_count += 1
+        logger.info('Finish updating movies, %d movies added', added_count)
+        return added_count
 
     def search_resources(self, subject_id: int):
         """
@@ -164,16 +206,18 @@ class VideoManager:
 
         weights = {}
         paths = [os.path.join(self.__temp_dir, x) for x in os.listdir(self.__temp_dir) if x.startswith(str(subject_id))]
+        if any([os.path.splitext(x)[1] not in VIDEO_SUFFIXES for x in paths]):
+            return 'Not all downloaded'
         for path in paths:
             try:
                 weight = weight_video_file(path, subject['durations'], subject['subtype'])
                 if weight < 0:
-                    file.del_to_recycle(path)
+                    file.delete_file(path, False)
                 else:
                     weights[path] = weight
-            except IOError as error:
-                logger.error(error)
-                file.del_to_recycle(path)
+            except IOError as e:
+                logger.error(e)
+                file.delete_file(path)
         if len(weights) == 0:
             logger.warning('No qualified video file: %s', subject['title'])
             return self.update_archived(subject_id, Archived.none)
@@ -187,7 +231,7 @@ class VideoManager:
             if code != 0:
                 return msg
             for p in weights:
-                file.del_to_recycle(p)
+                file.delete_file(p, False)
         else:
             episodes_count = subject['episodes_count']
             with open('instance/tv.txt', 'a', encoding='utf-8') as fp:
@@ -217,7 +261,7 @@ class VideoManager:
                 if code != 0:
                     continue
                 for p in files:
-                    file.del_to_recycle(p)
+                    file.delete_file(p)
         return self.update_archived(subject_id, Archived.playable, location=location)
 
     def is_archived(self, subject):
@@ -247,15 +291,16 @@ class VideoManager:
         return False, location
 
     def add_movie(self, subject):
+        params = {}
+        for k, v in subject.items():
+            if k in self.SOURCE_FIELDS and v is not None:
+                params[k] = v
+        self.__parse_subject(subject)
+        params['archived'] = Archived.added
         con = self.connection
         cursor = con.cursor()
-        cursor.execute('INSERT INTO movie(id, title, alt,status, tag_date, original_title, aka, subtype, languages, '
-                       'year, durations, current_season, episodes_count, seasons_count, last_update, archived) '
-                       'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME(\'now\'), 0)',
-                       ([subject[key] for key in [
-                           'id', 'title', 'alt', 'status', 'tag_date', 'original_title', 'aka', 'subtype', 'languages',
-                           'year', 'durations', 'current_season', 'episodes_count', 'seasons_count'
-                       ]]))
+        cursor.execute('INSERT INTO movie(%s, last_update) VALUES (%s, DATETIME(\'now\'))'
+                       % (', '.join(params.keys()), ', '.join([':' + x for x in params])), params)
         if cursor.rowcount != 1:
             logger.error('Failed to Add movie: %s. ROLLBACK!', subject['title'])
             con.rollback()
@@ -266,10 +311,11 @@ class VideoManager:
     def update_movie(self, subject_id: int, ignore_none=True, **kwargs):
         params = {}
         for k, v in kwargs.items():
-            if not ignore_none or v is not None:
+            if k in self.FIELDS and (not ignore_none or v is not None):
                 params[k] = v
-        if not params or len(params) == 0:
+        if len(params) == 0:
             raise ValueError('No params to update')
+        self.__parse_subject(params)
         con = self.connection
         cursor = con.cursor()
         cursor.execute('UPDATE movie SET last_update=DATETIME(\'now\'), %s WHERE id = %d'
@@ -309,6 +355,15 @@ class VideoManager:
             return dict(r)
         return None
 
+    @staticmethod
+    def __parse_subject(subject):
+        if 'status' in subject and isinstance(subject['status'], str):
+            subject['status'] = Status.from_name(Status, subject['status'])
+        if 'subtype' in subject and isinstance(subject['subtype'], str):
+            subject['subtype'] = Subtype.from_name(Subtype, subject['subtype'])
+        if 'archived' in subject and isinstance(subject['archived'], str):
+            subject['archived'] = Archived.from_name(Archived, subject['archived'])
+
     def __select_movie(self, order_by=None, desc='asc', ignore_blank=False, **params):
         sql = 'SELECT * FROM movie'
         if ignore_blank:
@@ -316,6 +371,7 @@ class VideoManager:
                 if v is None or v == '':
                     del params[k]
         if params and len(params) > 0:
+            self.__parse_subject(params)
             sql += ' WHERE %s' % (' AND '.join(['%s = :%s' % (k, k) for k in params]))
         if order_by:
             sql += ' ORDER BY %s' % order_by
@@ -391,7 +447,6 @@ def weight_video(ext=None, movie_durations=None, size=-1, file_duration=-1, subt
                         ws.append(100 * (i + 1) / len(durations))
                         break
                     if i == len(durations) - 1:
-                        # logger.warning('Error durations: %.2f, %s', file_duration / 60, ','.join([str(x) for x in movie_durations]))
                         return -1
             else:
                 ws.append(100 * file_duration / durations[-1] if file_duration <= durations[-1] else durations[-1] / file_duration)
@@ -441,3 +496,13 @@ def classify_url(url: str):
         if url.startswith(head):
             return head, url
     return 'unknown', url
+
+
+def remove_redundant_spaces(string):
+    if isinstance(string, str):
+        return re.sub(r'\s+', ' ', string.strip())
+    if isinstance(string, list) or isinstance(string, tuple):
+        for i, s in enumerate(string):
+            string[i] = re.sub(r'\s+', ' ', s.strip())
+        return string
+    raise ValueError

@@ -54,9 +54,12 @@ def get_md5(path, block_size=st_blksize):
         return md5value
 
 
-def del_to_recycle(filepath):
-    logger.info('Delete to recycle bin: %s', filepath)
-    return shell_file_operation(0, FO_DELETE, filepath, None, FOF_ALLOWUNDO)
+def delete_file(filepath, undo=True):
+    if undo:
+        logger.info('Delete to recycle bin: %s', filepath)
+        return shell_file_operation(0, FO_DELETE, filepath, None, FOF_ALLOWUNDO)
+    logger.info('Delete file: %s', filepath)
+    return os.remove(filepath)
 
 
 def shell_file_operation(file_handle, func, p_from, p_to, flags, name_dict=None, progress_title=None):

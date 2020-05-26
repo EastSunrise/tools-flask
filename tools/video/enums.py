@@ -3,26 +3,25 @@
 @Author Kingen
 @Date 2020/5/18
 """
-from enum import Enum
 
-from tools.utils.common import BaseEnum
-
-
-class Status(Enum):
-    unmarked = BaseEnum(0, '未标记')
-    wish = BaseEnum(1, '想看')
-    do = BaseEnum(2, '在看')
-    collect = BaseEnum(3, '看过')
+from tools.utils.common import BaseEnum, BaseEnumValue
 
 
-class Archived(Enum):
-    none = BaseEnum(-1, '没有资源')
-    added = BaseEnum(0, '已添加')
-    playable = BaseEnum(1, '可播放')
-    idm = BaseEnum(2, 'IDM')
-    downloading = BaseEnum(3, '下载中')
+class Status(BaseEnum):
+    unmarked = BaseEnumValue(0, '未标记')
+    wish = BaseEnumValue(1, '想看')
+    do = BaseEnumValue(2, '在看')
+    collect = BaseEnumValue(3, '看过')
 
 
-class Subtype(Enum):
-    movie = BaseEnum(0, '电影')
-    tv = BaseEnum(1, '电视剧')
+class Archived(BaseEnum):
+    none = BaseEnumValue(-1, '没有资源')
+    added = BaseEnumValue(0, '已添加')
+    playable = BaseEnumValue(1, '可播放')
+    idm = BaseEnumValue(2, 'IDM')
+    downloading = BaseEnumValue(3, '下载中')
+
+
+class Subtype(BaseEnum):
+    movie = BaseEnumValue(0, '电影')
+    tv = BaseEnumValue(1, '电视剧')

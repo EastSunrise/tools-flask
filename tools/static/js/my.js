@@ -98,6 +98,8 @@ function bindClick(_this, tip, href, subject_id, confirmMsg) {
                         updateArchived(_this, result['archived'], subject_id);
                     } else {
                         alert(result['msg']);
+                        _this.attr('hidden', false);
+                        clickTip.attr('hidden', true);
                     }
                 },
                 error: function () {
@@ -146,4 +148,19 @@ function updateArchived(_this, archived, subject_id) {
         default:
             alert('Unknown archived result');
     }
+}
+
+function updateMyMovies() {
+    $.ajax('/video/update', {
+        type: 'get',
+        dataType: 'json',
+        success: function (result) {
+            if (result['success']) {
+                alert(result['count'] + ' added');
+            }
+        },
+        error: function () {
+            alert('无法连接到服务器！');
+        },
+    });
 }

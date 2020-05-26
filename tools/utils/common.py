@@ -3,17 +3,7 @@
 @Author Kingen
 @Date 2020/4/12
 """
-
-
-def merge_dict(dict1: dict, dict2: dict):
-    """
-    Merge dict2 into dict1 recursively
-    """
-    for key, value in dict2.values():
-        if key in dict1 and isinstance(value, dict) and isinstance(dict1[key], dict):
-            merge_dict(dict1[key], value)
-        else:
-            dict1[key] = value
+from enum import Enum, unique
 
 
 def cmp_strings(strings: list):
@@ -45,25 +35,36 @@ def cmp_strings(strings: list):
     return commons, diff
 
 
-class BaseEnum:
+@unique
+class BaseEnum(Enum):
+    def to_code(self) -> int:
+        return self.value.code
+
+    def from_code(self, code):
+        if code is None:
+            return None
+        if not isinstance(code, int):
+            code = int(code)
+        for m in self.__class__.__members__.values():
+            if m.value.code == code:
+                return m
+        raise ValueError('Unknown code %d for %s' % (code, self.__class__.__name__))
+
+    @staticmethod
+    def from_name(clazz, name):
+        if name is None:
+            return None
+        for n, m in clazz.__members__.items():
+            if n == name:
+                return m
+        raise ValueError('Unknown name %s for %s' % (name, clazz))
+
+
+class BaseEnumValue:
 
     def __init__(self, code: int, title: str) -> None:
         self.code = code
         self.title = title
-
-
-def from_name(name, t):
-    for n, m in t.__members__.items():
-        if n == name:
-            return m
-    return None
-
-
-def from_code(code, t):
-    for m in t.__members__.values():
-        if m.code == code:
-            return m
-    return None
 
 
 def fail(msg: str):

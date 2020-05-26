@@ -11,19 +11,18 @@ from urllib import error
 from flask import Blueprint, request, g, render_template
 from flask_cors import cross_origin
 
-from instance.private import video_cdn, idm_path, douban_api_key, Cookie, video_db
 from tools.internet.douban import Douban
 from tools.utils.common import success, fail
 from tools.video.enums import Status, Archived, Subtype
 from .manager import VideoManager
+
+video_config = None
 
 video_blu = Blueprint('video', __name__, url_prefix='/video')
 
 logger = logging.getLogger(__name__)
 
 origins = ['https://movie.douban.com', 'http://localhost:63342', 'http://127.0.0.1:5000']
-
-douban = Douban(douban_api_key)
 
 
 @video_blu.route('/my')
@@ -43,6 +42,13 @@ def my_movies():
             'subtype': Subtype.__members__
         }
     )
+
+
+@video_blu.route('/update')
+def update_my_movies():
+    if video_config['COOKIE']:
+        return success(count=manager().update_my_movies(Douban(video_config['API_KEY']), video_config['USER_ID'], video_config['COOKIE']))
+    return fail('No cookie')
 
 
 @video_blu.route('/search')
@@ -69,11 +75,12 @@ def is_archived():
 @cross_origin(origins=origins)
 def add():
     subject_id = request.args.get('id', type=int)
+    douban = Douban(video_config['API_KEY'])
     try:
         subject = douban.movie_subject(subject_id)
     except error.HTTPError as e:
-        if e.code == 404 and Cookie:
-            subject = douban.movie_subject_with_cookie(subject_id, Cookie)
+        if e.code == 404 and video_config['COOKIE']:
+            subject = douban.movie_subject_with_cookie(subject_id, video_config['COOKIE'])
         else:
             return archived_result('Not Found')
     subject['status'] = request.args.get('status', type=Status)
@@ -126,9 +133,15 @@ def close_connection(e=None):
         g.manager.close_connection()
 
 
+def init_config(config, config_file):
+    global video_config
+    video_config = config
+    video_config.from_pyfile(config_file)
+
+
 def manager():
     if 'manager' not in g:
-        g.manager = VideoManager(video_cdn, video_db, idm_path)
+        g.manager = VideoManager(video_config['CDN'], video_config['VIDEO_DB'], video_config['IDM_PATH'])
     return g.manager
 
 

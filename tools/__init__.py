@@ -5,10 +5,10 @@
 """
 import os
 
-from flask import Flask
+from flask import Flask, Config
 
 
-def create_app(config_file, db):
+def create_app(config_file, db, video_config_file):
     """
     :param config_file: relative path to instance_path
     :return:
@@ -26,5 +26,6 @@ def create_app(config_file, db):
 
     from tools import video
     app.register_blueprint(video.video_blu, url_prefix='/video')
+    video.init_config(Config(app.instance_path), video_config_file)
 
     return app
