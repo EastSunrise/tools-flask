@@ -67,7 +67,7 @@ def is_archived():
     subject_id = request.args.get('id', type=int)
     movie = manager().get_movie(id=subject_id)
     if movie:
-        return success(id=subject_id, archived=movie['archived'], location=movie['location'])
+        return archived_result(movie['archived'])
     return fail('Not found')
 
 
@@ -83,10 +83,8 @@ def add():
             subject = douban.movie_subject_with_cookie(subject_id, video_config['COOKIE'])
         else:
             return archived_result('Not Found')
-    subject['status'] = request.args.get('status', type=Status)
-    if subject['status'] is None:
-        subject['status'] = 'unmarked'
-    subject['tag_date'] = request.args.get('tag_date')
+    if subject.get('status', None) is None:
+        subject['status'] = Status.unmarked
     if manager().add_movie(subject):
         return archived_result(Archived.added)
     return archived_result('Failed to insert')
@@ -106,10 +104,10 @@ def play():
     movie = manager().get_movie(id=subject_id)
     if movie:
         location = movie['location']
-        if movie['subtype'] == 'movie' and os.path.isfile(location):
+        if movie['subtype'] == Subtype.movie and os.path.isfile(location):
             os.startfile(location)
             return archived_result(Archived.playable)
-        elif movie['subtype'] == 'tv' and os.path.isdir(location) and len(os.listdir(location)) > 0:
+        elif movie['subtype'] == Subtype.tv and os.path.isdir(location) and len(os.listdir(location)) > 0:
             os.startfile(os.path.join(location, os.listdir(location)[0]))
             return archived_result(Archived.playable)
     return archived_result('Not found')

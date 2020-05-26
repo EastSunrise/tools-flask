@@ -128,7 +128,7 @@ class VideoManager:
         if subject is None:
             logger.info('No subject found with id: %d', subject_id)
             return 'No subject found'
-        subject_id, title, subtype = subject['id'], subject['title'], subject['subtype']
+        subject_id, title = subject['id'], subject['title']
         archived, location = self.is_archived(subject)
         logger.info('Collecting subject: %s, %s', title, subject['alt'])
         if archived:
@@ -222,7 +222,7 @@ class VideoManager:
             logger.warning('No qualified video file: %s', subject['title'])
             return self.update_archived(subject_id, Archived.none)
 
-        if subject['subtype'] == 'movie':
+        if subject['subtype'] == Subtype.movie:
             chosen = max(weights, key=lambda x: weights[x])
             logger.info('Chosen file: %.2f, %s', weights[chosen], chosen)
             ext = os.path.splitext(chosen)[1]
@@ -268,7 +268,7 @@ class VideoManager:
         """
         :return: (False/True, location)
         """
-        subtype = 'Movies' if subject['subtype'] == 'movie' else 'TV' if subject['subtype'] == 'tv' else 'Unknown'
+        subtype = 'Movies' if subject['subtype'] == Subtype.movie else 'TV' if subject['subtype'] == Subtype.tv else 'Unknown'
         language = subject['languages'][0]
         language = '华语' if language in self.CHINESE else language
         path = os.path.join(self.cdn, subtype, language)
@@ -280,10 +280,10 @@ class VideoManager:
         filename = re.sub(r'[\\/:*?"<>|]', '$', filename)
 
         location = os.path.join(path, filename)
-        if subject['subtype'] == 'tv' and os.path.isdir(location):
+        if subject['subtype'] == Subtype.tv and os.path.isdir(location):
             if len([x for x in os.listdir(location) if re.match(r'E\d+', x)]) == subject['episodes_count']:
                 return True, location
-        if subject['subtype'] == 'movie' and os.path.isdir(path):
+        if subject['subtype'] == Subtype.movie and os.path.isdir(path):
             with os.scandir(path) as sp:
                 for f in sp:
                     if f.is_file() and os.path.splitext(f.name)[0] == filename:
@@ -295,7 +295,7 @@ class VideoManager:
         for k, v in subject.items():
             if k in self.SOURCE_FIELDS and v is not None:
                 params[k] = v
-        self.__parse_subject(subject)
+        self.__parse_subject(params)
         params['archived'] = Archived.added
         con = self.connection
         cursor = con.cursor()
@@ -395,7 +395,7 @@ def get_duration(filepath):
     raise IOError('Duration Not Found')
 
 
-def weight_video_file(filepath, movie_durations=None, subtype='movie'):
+def weight_video_file(filepath, movie_durations=None, subtype=Subtype.movie):
     """
     Read related arguments from a file.
     """
@@ -407,7 +407,7 @@ def weight_video_file(filepath, movie_durations=None, subtype='movie'):
     return weight_video(ext, movie_durations, size, duration, subtype=subtype)
 
 
-def weight_video(ext=None, movie_durations=None, size=-1, file_duration=-1, subtype='movie'):
+def weight_video(ext=None, movie_durations=None, size=-1, file_duration=-1, subtype=Subtype.movie):
     """
     Calculate weight of a file for a movie. Larger the result is, higher quality the file has.
     Properties read from the file have higher priority than those specified by arguments.
@@ -441,7 +441,7 @@ def weight_video(ext=None, movie_durations=None, size=-1, file_duration=-1, subt
     if movie_durations and len(movie_durations) > 0:
         durations = sorted([int(re.findall(r'\d+', d)[0]) for d in movie_durations])
         if file_duration >= 0:
-            if subtype == 'movie':
+            if subtype == Subtype.movie:
                 for i, duration in enumerate(durations):
                     if abs(duration * 60 - file_duration) < movie_duration_error:
                         ws.append(100 * (i + 1) / len(durations))

@@ -14,6 +14,7 @@ from urllib.request import Request
 
 import bs4
 
+from tools.video import Subtype
 from . import logger
 from .spider import get_soup, browser
 
@@ -127,7 +128,7 @@ class VideoSearch(metaclass=abc.ABCMeta):
         get titles that may match the subject
         :return (set of keys to search, set of possible matches)
         """
-        if subject['subtype'] == 'movie':
+        if subject['subtype'] == Subtype.movie:
             keys = [subject['title']]
             matches = {subject['title']}
             for x in subject['aka']:
@@ -162,20 +163,20 @@ class VideoSearch(metaclass=abc.ABCMeta):
         pass
 
     @abc.abstractmethod
-    def _find_resources(self, soup: bs4.BeautifulSoup, subtype) -> list:
+    def _find_resources(self, soup: bs4.BeautifulSoup, subtype: Subtype) -> list:
         """
         Search resources by key and filtering by subtype is required.
         :return: [{'name': resource_name, 'href': href},...]
         """
         pass
 
-    def _parse_resource_name(self, name, subtype):
+    def _parse_resource_name(self, name, subtype: Subtype):
         invalid_str = ['国语', '中字', '高清', 'HD', 'BD', '1280', 'DVD', '《', '》', '720p', '[', ']',
                        '1024', '576', '*', '中英字幕', '中英双字', '无水']
         for s in invalid_str:
             name = name.replace(s, '')
         # name = re.sub(r'\[.*\]', '', name)
-        if subtype == 'movie':
+        if subtype == Subtype.movie:
             return set([n.strip().replace('  ', '') for n in name.split('/')])
         else:
             season = re.search(r'第.{1,2}季', name)
@@ -244,7 +245,7 @@ class VideoSearch80s(VideoSearch):
         search_req.add_header('Referer', 'http://www.y80s.com/')
         return search_req
 
-    def _find_resources(self, soup, subtype) -> list:
+    def _find_resources(self, soup, subtype: Subtype) -> list:
         resources = []
         if soup.find('div', class_='nomoviesinfo'):
             return []
@@ -252,7 +253,7 @@ class VideoSearch80s(VideoSearch):
         for mov in ul.find_all('li'):
             mov_a = mov.h3.a
             href = mov_a['href']
-            t = 'movie' if 'movie' in href else ('tv' if ('ju' in href or 'zy' in href) else 'unknown')
+            t = Subtype.movie if 'movie' in href else (Subtype.tv if ('ju' in href or 'zy' in href) else 'unknown')
             if subtype == t:
                 resources.append({
                     'name': mov_a.get_text().strip(),
@@ -364,7 +365,7 @@ class VideoSearchAxj(VideoSearch):
         })
 
     def _search_req(self, key, **kwargs) -> Request:
-        fid = '26' if kwargs['subtype'] == 'movie' else '27'
+        fid = '26' if kwargs['subtype'] == Subtype.movie else '27'
         search_req = request.Request(self._get_full_url('/app-thread-run', fid=fid, app='search', keywords=key, orderby='lastpost_time'),
                                      headers=self._headers, method='GET')
         search_req.add_header('Referer', self.home)
@@ -415,14 +416,14 @@ class VideoSearchZhandi(VideoSearch):
         search_req.add_header('Referer', 'https://www.zhandi.cc/')
         return search_req
 
-    def _find_resources(self, soup, subtype) -> list:
+    def _find_resources(self, soup, subtype: Subtype) -> list:
         resources = []
         for mov in soup.find('ul', {'id': 'contents'}).find_all('li'):
             mov_a = mov.h5.a
             if any(t in mov_a['href'] for t in ['Dz', 'Xj', 'Aq', 'Kh', 'Kb', 'War', 'Jq']):
-                t = 'movie'
+                t = Subtype.movie
             elif any(t in mov_a['href'] for t in ['Gc', 'Gt', 'Om', 'Rh', 'Hw', 'Zy']):
-                t = 'tv'
+                t = Subtype.tv
             else:
                 t = 'unknown'
             if subtype == t:
