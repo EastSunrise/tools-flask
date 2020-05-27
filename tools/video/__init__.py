@@ -8,15 +8,14 @@ import os
 import re
 from urllib import error
 
-from flask import Blueprint, request, g, render_template
+from flask import Blueprint, request, render_template, g
 from flask_cors import cross_origin
 
-from tools.internet.douban import Douban
-from tools.utils.common import success, fail
-from tools.video.enums import Status, Archived, Subtype
+from tools.utils.common import success, fail, read_config_from_py_file
+from .enums import Status, Archived, Subtype
 from .manager import VideoManager
 
-video_config = None
+video_manager = None
 
 video_blu = Blueprint('video', __name__, url_prefix='/video')
 
@@ -46,9 +45,8 @@ def my_movies():
 
 @video_blu.route('/update')
 def update_my_movies():
-    if video_config['COOKIE']:
-        return success(count=manager().update_my_movies(Douban(video_config['API_KEY']), video_config['USER_ID'], video_config['COOKIE']))
-    return fail('No cookie')
+    added_count, error_count = manager().update_my_movies(request.args.get('user_id', type=int))
+    return success(added=added_count, error=error_count)
 
 
 @video_blu.route('/search')
@@ -64,8 +62,7 @@ def is_archived():
     params: id=<subject_id>
     :return: archived info of the subject
     """
-    subject_id = request.args.get('id', type=int)
-    movie = manager().get_movie(id=subject_id)
+    movie = manager().get_movie(id=request.args.get('id', type=int))
     if movie:
         return archived_result(movie['archived'])
     return fail('Not found')
@@ -74,27 +71,18 @@ def is_archived():
 @video_blu.route('/add')
 @cross_origin(origins=origins)
 def add():
-    subject_id = request.args.get('id', type=int)
-    douban = Douban(video_config['API_KEY'])
     try:
-        subject = douban.movie_subject(subject_id)
+        if manager().add_subject(request.args.get('id', type=int)):
+            return archived_result(Archived.added)
+        return archived_result('Failed to insert')
     except error.HTTPError as e:
-        if e.code == 404 and video_config['COOKIE']:
-            subject = douban.movie_subject_with_cookie(subject_id, video_config['COOKIE'])
-        else:
-            return archived_result('Not Found')
-    if subject.get('status', None) is None:
-        subject['status'] = Status.unmarked
-    if manager().add_movie(subject):
-        return archived_result(Archived.added)
-    return archived_result('Failed to insert')
+        return archived_result(e.reason)
 
 
 @video_blu.route('/collect')
 @cross_origin(origins=origins)
 def collect():
-    subject_id = request.args.get('id', type=int)
-    return archived_result(manager().collect_resources(subject_id))
+    return archived_result(manager().collect_resources(request.args.get('id', type=int)))
 
 
 @video_blu.route('/play')
@@ -129,18 +117,21 @@ def archive_temp():
 def close_connection(e=None):
     if 'manager' in g and g.manager is not None:
         g.manager.close_connection()
-
-
-def init_config(config, config_file):
-    global video_config
-    video_config = config
-    video_config.from_pyfile(config_file)
+    if e is not None:
+        logger.error(e)
 
 
 def manager():
     if 'manager' not in g:
-        g.manager = VideoManager(video_config['CDN'], video_config['VIDEO_DB'], video_config['IDM_PATH'])
+        global video_manager
+        g.manager = video_manager
     return g.manager
+
+
+def init_manager(config_file):
+    config = read_config_from_py_file(config_file)
+    global video_manager
+    video_manager = VideoManager(config.cdn, config.video_db, config.idm_path, config.api_key, config.cookie)
 
 
 def archived_result(result):

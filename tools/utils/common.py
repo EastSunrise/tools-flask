@@ -3,7 +3,20 @@
 @Author Kingen
 @Date 2020/4/12
 """
+import types
 from enum import Enum, unique
+
+
+def read_config_from_py_file(filepath):
+    d = types.ModuleType("config")
+    d.__file__ = filepath
+    try:
+        with open(filepath, mode="rb") as config_file:
+            exec(compile(config_file.read(), filepath, "exec"), d.__dict__)
+    except IOError as e:
+        e.strerror = "Unable to load configuration file (%s)" % e.strerror
+        raise
+    return d
 
 
 def cmp_strings(strings: list):

@@ -39,12 +39,14 @@ class VideoManager:
                      'durations', 'current_season', 'episodes_count', 'season_count']
     FIELDS = SOURCE_FIELDS + ['archived', 'location', 'source', 'last_update']
 
-    def __init__(self, cdn, db_path, idm_path='IDM.exe') -> None:
+    def __init__(self, cdn, db_path, idm_path, api_key, cookie) -> None:
         self.cdn = cdn
-        self.__db = db_path
-        self.__con = None
         self.__temp_dir = os.path.join(self.cdn, 'Temp')
-        self.__idm = IDM(idm_path)
+        self.__db = db_path
+        self.__idm = IDM(idm_path, self.__temp_dir)
+        self.__douban: Douban = Douban(api_key)
+        self.__cookie = cookie
+        self.__con = None
 
     @property
     def cdn(self):
@@ -67,15 +69,15 @@ class VideoManager:
     def close_connection(self):
         if self.__con is not None:
             self.__con.close()
+            self.__con = None
 
-    def update_my_movies(self, douban: Douban, user_id, cookie, start_date=None):
+    def update_my_movies(self, user_id, start_date=None):
         """
         Update my collected movies from Douban to database.
 
         If not exist in db, get full info and insert into db, with archived set to 0.
         If exists, update status and tag_date.
 
-        :param douban: an instance of Douban client
         :param start_date: when tag_date start
         """
         subjects = self.get_movies()
@@ -83,27 +85,46 @@ class VideoManager:
         if start_date is None and len(subjects) > 0:
             start_date = max([x['tag_date'] for x in subjects if x['tag_date'] is not None])
         logger.info('Start updating movies since %s', start_date if start_date else '')
-        added_count = 0
-        for subject_id, subject in douban.collect_user_movies(user_id, start_date=start_date).items():
+        added_count = error_count = 0
+        for subject_id, subject in self.__douban.collect_user_movies(user_id, start_date=start_date).items():
             subject_id = int(subject_id)
             try:
-                subject.update(douban.movie_subject(subject_id))
+                subject.update(self.movie_subject(subject_id))
             except error.HTTPError as e:
-                if e.code == 404:
-                    subject.update(douban.movie_subject_with_cookie(subject_id, cookie))
-                else:
-                    raise e
-            subject['title'] = remove_redundant_spaces(subject['title'])
-            subject['original_title'] = remove_redundant_spaces(subject['original_title'])
-            remove_redundant_spaces(subject['aka'])
+                error_count += 1
+                logger.error(e)
 
             if subject_id in ids:
                 self.update_movie(subject_id, **subject)
             else:
                 if self.add_movie(subject):
                     added_count += 1
-        logger.info('Finish updating movies, %d movies added', added_count)
-        return added_count
+        logger.info('Finish updating movies, %d movies added, %d errors', added_count, error_count)
+        return added_count, error_count
+
+    def add_subject(self, subject_id: int):
+        subject = self.get_movie(id=subject_id)
+        if subject is None:
+            return self.add_movie(self.movie_subject(subject_id))
+        logger.info('Exists subject: %d', subject_id)
+        return True
+
+    def movie_subject(self, subject_id):
+        try:
+            subject = self.__douban.movie_subject(subject_id)
+        except error.HTTPError as e:
+            if e.code == 404:
+                subject = self.__douban.movie_subject_with_cookie(subject_id, self.__cookie)
+            else:
+                raise
+        subject['subtype'] = Subtype.from_name(Subtype, subject['subtype'])
+        subject['title'] = remove_redundant_spaces(subject['title'])
+        subject['original_title'] = remove_redundant_spaces(subject['original_title'])
+        remove_redundant_spaces(subject['aka'])
+        for k in subject.copy():
+            if k not in self.FIELDS:
+                del subject[k]
+        return subject
 
     def search_resources(self, subject_id: int):
         """
@@ -291,16 +312,14 @@ class VideoManager:
         return False, location
 
     def add_movie(self, subject):
-        params = {}
-        for k, v in subject.items():
-            if k in self.SOURCE_FIELDS and v is not None:
-                params[k] = v
-        self.__parse_subject(params)
-        params['archived'] = Archived.added
+        if subject.get('archived', None) is None:
+            subject['archived'] = Archived.added
+        if subject.get('status', None) is None:
+            subject['status'] = Status.unmarked
         con = self.connection
         cursor = con.cursor()
         cursor.execute('INSERT INTO movie(%s, last_update) VALUES (%s, DATETIME(\'now\'))'
-                       % (', '.join(params.keys()), ', '.join([':' + x for x in params])), params)
+                       % (', '.join(subject.keys()), ', '.join([':' + x for x in subject])), subject)
         if cursor.rowcount != 1:
             logger.error('Failed to Add movie: %s. ROLLBACK!', subject['title'])
             con.rollback()
@@ -309,17 +328,16 @@ class VideoManager:
         return True
 
     def update_movie(self, subject_id: int, ignore_none=True, **kwargs):
-        params = {}
-        for k, v in kwargs.items():
-            if k in self.FIELDS and (not ignore_none or v is not None):
-                params[k] = v
-        if len(params) == 0:
+        if ignore_none:
+            for k, v in kwargs.copy().items():
+                if v is None:
+                    del kwargs[k]
+        if len(kwargs) == 0:
             raise ValueError('No params to update')
-        self.__parse_subject(params)
         con = self.connection
         cursor = con.cursor()
         cursor.execute('UPDATE movie SET last_update=DATETIME(\'now\'), %s WHERE id = %d'
-                       % (', '.join(['%s = :%s' % (k, k) for k in params]), subject_id), params)
+                       % (', '.join(['%s = :%s' % (k, k) for k in kwargs]), subject_id), kwargs)
         if cursor.rowcount != 1:
             logger.error('Failed to update movie: %d', subject_id)
             con.rollback()
@@ -336,7 +354,7 @@ class VideoManager:
         con = self.connection
         cursor = con.cursor()
         cursor.execute('UPDATE movie SET archived = ?, location = ?, last_update=DATETIME(\'now\') WHERE id = ?',
-                       (dst.name, location, subject_id))
+                       (dst, location, subject_id))
         if cursor.rowcount != 1:
             logger.error('Failed to update archived of movie: %d', subject_id)
             con.rollback()

@@ -5,7 +5,7 @@
 """
 import os
 
-from flask import Flask, Config
+from flask import Flask
 
 
 def create_app(config_file, db, video_config_file):
@@ -26,6 +26,6 @@ def create_app(config_file, db, video_config_file):
 
     from tools import video
     app.register_blueprint(video.video_blu, url_prefix='/video')
-    video.init_config(Config(app.instance_path), video_config_file)
+    video.init_manager(os.path.join(app.instance_path, video_config_file))
 
     return app
