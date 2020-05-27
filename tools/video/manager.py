@@ -217,10 +217,6 @@ class VideoManager:
         :return: -2: IOError, -1: no qualified file, 1: archived
         """
         subject = self.get_movie(id=subject_id)
-        archived, location = self.is_archived(subject)
-        if archived:
-            return self.update_archived(subject_id, Archived.playable, location=location)
-
         if len(subject['durations']) == 0:
             logger.warning('No durations set for %s, id: %d', subject['title'], subject_id)
             return 'No durations'
@@ -243,14 +239,21 @@ class VideoManager:
             logger.warning('No qualified video file: %s', subject['title'])
             return self.update_archived(subject_id, Archived.none)
 
+        archived, location = self.is_archived(subject)
         if subject['subtype'] == Subtype.movie:
             chosen = max(weights, key=lambda x: weights[x])
             logger.info('Chosen file: %.2f, %s', weights[chosen], chosen)
-            ext = os.path.splitext(chosen)[1]
-            location = os.path.join(location + ext)
-            code, msg = file.copy(chosen, location)
-            if code != 0:
-                return msg
+            dst = os.path.splitext(location)[0] + os.path.splitext(chosen)[1]
+            if archived:
+                if weight_video_file(location, subject['durations'], subject['subtype']) < weights[chosen]:
+                    file.delete_file(location)
+                    code, msg = file.copy(chosen, dst)
+                    if code != 0:
+                        return msg
+            else:
+                code, msg = file.copy(chosen, dst)
+                if code != 0:
+                    return msg
             for p in weights:
                 file.delete_file(p, False)
         else:
@@ -284,6 +287,20 @@ class VideoManager:
                 for p in files:
                     file.delete_file(p)
         return self.update_archived(subject_id, Archived.playable, location=location)
+
+    def play(self, subject_id):
+        movie = self.get_movie(id=subject_id)
+        if movie:
+            location = movie['location']
+            if movie['subtype'] == Subtype.movie and os.path.isfile(location):
+                os.startfile(location)
+                return Archived.playable
+            elif movie['subtype'] == Subtype.tv and os.path.isdir(location) and len(os.listdir(location)) > 0:
+                os.startfile(os.path.join(location, os.listdir(location)[0]))
+                return Archived.playable
+            logger.info('No location found')
+            return self.update_archived(subject_id, Archived.added)
+        return 'Not found'
 
     def is_archived(self, subject):
         """

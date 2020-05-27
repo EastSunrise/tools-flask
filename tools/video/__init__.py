@@ -4,7 +4,6 @@
 @Date 2020/5/12
 """
 import logging
-import os
 import re
 from urllib import error
 
@@ -15,7 +14,7 @@ from tools.utils.common import success, fail, read_config_from_py_file
 from .enums import Status, Archived, Subtype
 from .manager import VideoManager
 
-video_manager = None
+config = None
 
 video_blu = Blueprint('video', __name__, url_prefix='/video')
 
@@ -88,17 +87,7 @@ def collect():
 @video_blu.route('/play')
 @cross_origin(origins=origins)
 def play():
-    subject_id = request.args.get('id', type=int)
-    movie = manager().get_movie(id=subject_id)
-    if movie:
-        location = movie['location']
-        if movie['subtype'] == Subtype.movie and os.path.isfile(location):
-            os.startfile(location)
-            return archived_result(Archived.playable)
-        elif movie['subtype'] == Subtype.tv and os.path.isdir(location) and len(os.listdir(location)) > 0:
-            os.startfile(os.path.join(location, os.listdir(location)[0]))
-            return archived_result(Archived.playable)
-    return archived_result('Not found')
+    return archived_result(manager().play(request.args.get('id', type=int)))
 
 
 @video_blu.route('/archive')
@@ -123,15 +112,14 @@ def close_connection(e=None):
 
 def manager():
     if 'manager' not in g:
-        global video_manager
-        g.manager = video_manager
+        global config
+        g.manager = VideoManager(config.cdn, config.video_db, config.idm_path, config.api_key, config.cookie)
     return g.manager
 
 
 def init_manager(config_file):
+    global config
     config = read_config_from_py_file(config_file)
-    global video_manager
-    video_manager = VideoManager(config.cdn, config.video_db, config.idm_path, config.api_key, config.cookie)
 
 
 def archived_result(result):
