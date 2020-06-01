@@ -8,6 +8,7 @@ import logging
 import math
 import os
 import re
+import shutil
 from sqlite3 import connect, PARSE_DECLTYPES, Row
 from urllib import parse, error
 
@@ -87,6 +88,7 @@ class VideoManager:
         logger.info('Start updating movies since %s', start_date if start_date else '')
         added_count = error_count = 0
         for subject_id, subject in self.__douban.collect_user_movies(user_id, start_date=start_date).items():
+            subject['status'] = Status.from_name(Status, subject.get('status'))
             subject_id = int(subject_id)
             try:
                 subject.update(self.movie_subject(subject_id))
@@ -178,22 +180,30 @@ class VideoManager:
                     filename = u.split('|')[2]
                     ext = os.path.splitext(filename)[1]
                     size = int(u.split('|')[3])
+                elif p == 'torrent':
+                    filename = os.path.basename(u)
                 if weight_video(ext, subject['durations'], size) < 0:
                     continue
                 links[p][u] = (u, filename, ext)
 
-        # add download tasks
+        dst_dir = os.path.join(self.__temp_dir, '%d_%s' % (subject_id, title))
+        os.makedirs(dst_dir, exist_ok=True)
         url_count = 0
         for u, filename, ext in links['http'].values():
             logger.info('Add IDM task of %s, downloading from %s to the temporary dir', title, u)
-            self.__idm.add_task(u, self.__temp_dir, '%d_%s_http_%d_%s' % (subject_id, title, url_count, filename))
+            self.__idm.add_task(u, dst_dir, '%d_%s_http_%d_%s' % (subject_id, title, url_count, filename))
             url_count += 1
         pythoncom.CoInitialize()
         thunder = Thunder()
-        for p in ['ed2k', 'ftp']:
+        for p in ['ed2k', 'ftp', 'torrent']:
             for u, filename, ext in links[p].values():
                 logger.info('Add Thunder task of %s, downloading from %s to the temporary dir', title, u)
                 thunder.add_task(u, '%d_%s_%s_%d_%s' % (subject_id, title, p, url_count, filename))
+                url_count += 1
+        for p in ['magnet']:
+            for u, filename, ext in links[p].values():
+                logger.info('Add Thunder task of %s, downloading from %s to the temporary dir', title, u)
+                thunder.add_task(u, '')
                 url_count += 1
         thunder.commit_tasks()
         pythoncom.CoUninitialize()
@@ -204,12 +214,36 @@ class VideoManager:
         logger.info('Tasks added: %d for %s. Downloading...', url_count, title)
         return self.update_archived(subject_id, Archived.downloading)
 
-    def archive(self, subject_id):
-        subject = self.get_movie(id=subject_id)
-        archived, location = self.is_archived(subject)
-        if archived:
-            return self.update_archived(subject_id, Archived.playable, location=location)
-        return self.update_archived(subject_id, Archived.none)
+    def archive(self):
+        subjects = self.get_movies(order_by='last_update', desc='desc')
+        archived_count = unarchived_count = 0
+        locations = set()
+        for subject in subjects:
+            archived, location = self.is_archived(subject)
+            if archived:
+                if subject['subtype'] == Subtype.movie:
+                    w = weight_video_file(location, subject['durations'], subject['subtype'])
+                    if w < 1000:
+                        logger.warning('Unqualified video file: %s, %d', location, w)
+                if subject['archived'] != Archived.playable or subject['location'] != location:
+                    if self.update_archived(subject['id'], Archived.playable, location):
+                        archived_count += 1
+                        locations.add(location)
+                        continue
+            elif subject['archived'] == Archived.playable:
+                if self.update_archived(subject['id'], Archived.added):
+                    unarchived_count += 1
+                    continue
+            locations.add(subject['location'])
+        logger.info('Finish archiving: %d archived, %d unarchived', archived_count, unarchived_count)
+
+        for dirpath, dirnames, filenames in os.walk(os.path.join(self.cdn, 'Movies')):
+            for filename in filenames:
+                filepath = os.path.join(dirpath, filename)
+                if filepath not in locations:
+                    logger.warning('Unarchived video file: %s', filepath)
+
+        return archived_count, unarchived_count
 
     def archive_temp(self, subject_id):
         """
@@ -222,21 +256,28 @@ class VideoManager:
             return 'No durations'
 
         weights = {}
-        paths = [os.path.join(self.__temp_dir, x) for x in os.listdir(self.__temp_dir) if x.startswith(str(subject_id))]
-        if any([os.path.splitext(x)[1] not in VIDEO_SUFFIXES for x in paths]):
-            return 'Not all downloaded'
-        for path in paths:
-            try:
-                weight = weight_video_file(path, subject['durations'], subject['subtype'])
-                if weight < 0:
-                    file.delete_file(path, False)
+        dst_dir = os.path.join(self.__temp_dir, '%d_%s' % (subject_id, subject['title']))
+        for dirpath, dirnames, filenames in os.walk(dst_dir):
+            for filename in filenames:
+                if filename.endswith('.torrent'):
+                    pass
+                elif os.path.splitext(filename)[1] in VIDEO_SUFFIXES:
+                    path = os.path.join(dirpath, filename)
+                    try:
+                        weight = weight_video_file(path, subject['durations'], subject['subtype'])
+                        if weight < 0:
+                            file.delete_file(path, False)
+                        else:
+                            weights[path] = weight
+                    except IOError as e:
+                        logger.error(e)
+                        file.delete_file(path, True)
                 else:
-                    weights[path] = weight
-            except IOError as e:
-                logger.error(e)
-                file.delete_file(path)
+                    return 'Not all downloaded'
+
         if len(weights) == 0:
             logger.warning('No qualified video file: %s', subject['title'])
+            shutil.rmtree(dst_dir)
             return self.update_archived(subject_id, Archived.none)
 
         archived, location = self.is_archived(subject)
@@ -246,7 +287,7 @@ class VideoManager:
             dst = os.path.splitext(location)[0] + os.path.splitext(chosen)[1]
             if archived:
                 if weight_video_file(location, subject['durations'], subject['subtype']) < weights[chosen]:
-                    file.delete_file(location)
+                    file.delete_file(location, False)
                     code, msg = file.copy(chosen, dst)
                     if code != 0:
                         return msg
@@ -285,7 +326,8 @@ class VideoManager:
                 if code != 0:
                     continue
                 for p in files:
-                    file.delete_file(p)
+                    file.delete_file(p, False)
+        shutil.rmtree(dst_dir)
         return self.update_archived(subject_id, Archived.playable, location=location)
 
     def play(self, subject_id):
@@ -463,42 +505,39 @@ def weight_video(ext=None, movie_durations=None, size=-1, file_duration=-1, subt
     """
     if movie_durations is None:
         movie_durations = []
-    ws = []
+    weight = 0
     if ext is not None:
         if ext not in VIDEO_SUFFIXES:
-            # logger.warning('No video file: %s', ext)
             return -1
         else:
             if ext in ('.mp4', '.mkv'):
-                ws.append(100)
+                weight += 100
             else:
-                ws.append(50)
+                weight += 50
     if movie_durations and len(movie_durations) > 0:
         durations = sorted([int(re.findall(r'\d+', d)[0]) for d in movie_durations])
         if file_duration >= 0:
             if subtype == Subtype.movie:
                 for i, duration in enumerate(durations):
                     if abs(duration * 60 - file_duration) < movie_duration_error:
-                        ws.append(100 * (i + 1) / len(durations))
+                        weight += (1000 * (i + 1) / len(durations))
                         break
                     if i == len(durations) - 1:
                         return -1
             else:
-                ws.append(100 * file_duration / durations[-1] if file_duration <= durations[-1] else durations[-1] / file_duration)
+                weight += (1000 * file_duration / durations[-1] if file_duration <= durations[-1] else durations[-1] / file_duration)
         if size >= 0:
             target_size = int(sum(durations) / len(durations) * standard_size)
             if size < (target_size // 2):
                 # logger.warning('Too small file: %s, request: %s', print_size(size), print_size(target_size))
                 return -1
             elif size <= target_size:
-                ws.append(100 * (size / target_size))
+                weight += (10 * (size / target_size))
             elif size <= (target_size * 2):
-                ws.append(100 * (target_size / size))
+                weight += (10 * (target_size / size))
             else:
-                ws.append(200 * (target_size / size) ** 2)
-    if len(ws) == 0:
-        return -1
-    return sum(ws) / len(ws)
+                weight += (20 * (target_size / size) ** 2)
+    return weight
 
 
 def classify_url(url: str):
@@ -541,3 +580,37 @@ def remove_redundant_spaces(string):
             string[i] = re.sub(r'\s+', ' ', s.strip())
         return string
     raise ValueError
+
+
+def separate_srt(src: str):
+    """
+    Separate the .srt file with two languages to separated files.
+    :param src: the path of the source file. Every 4 lines form a segment and segments are split by a space line.
+    """
+    if os.path.isfile(src) and src.lower().endswith('.srt'):
+        root, ext = os.path.splitext(src)
+        with open(src, mode='r', encoding='utf-8') as fp:
+            with open(root + '_1' + ext, 'w', encoding='utf-8') as f1:
+                with open(root + '_2' + ext, 'w', encoding='utf-8') as f2:
+                    segment = []
+                    for line in fp.readlines():
+                        if line != '\n':
+                            segment.append(line)
+                        else:
+                            if len(segment) != 4:
+                                logger.info('Special lines in No. %s', segment[0])
+                            f1.writelines([
+                                segment[0], segment[1], segment[2], '\n'
+                            ])
+                            f2.writelines([
+                                segment[0], segment[1], segment[3], '\n'
+                            ])
+                            segment = []
+
+
+def print_size(size: int):
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if size < 1024:
+            return '%.2f %s' % (size, unit)
+        size /= 1024
+    return '%.2f %s' % (size, 'PB')

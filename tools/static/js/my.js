@@ -62,13 +62,15 @@
         }
         selectedSpan.text(selectCount);
     });
-
-    $('#archiveBtn').on('click', function () {
-        $('.batchSelect:checked').each(function () {
-            // $(this).next('.archived').children('.playBtn').click();
-        });
-    });
 })();
+
+function archiveAll() {
+    $.getJSON('/video/archive', function (result) {
+        if (result['success']) {
+            alert(result['archived'] + ' archived, ' + result['unarchived'] + ' unarchived');
+        }
+    })
+}
 
 function bindClick(_this, tip, href, subject_id, confirmMsg) {
     let clickTip = _this.prev('.clickTip');

@@ -27,7 +27,7 @@
     </div>
     <div>
         共<span id="totalCount">{{ subjects | length }}</span>条，已选择<span id="selectedCount">0</span>条：
-        <input type="button" id="archiveBtn" value="批量归档"/>
+        <input type="button" id="archiveBtn" value="批量归档" onclick="archiveAll()"/>
         <input type="button" id="updateBtn" value="更新我的" onclick="updateMyMovies()"/>
     </div>
     <div>
@@ -44,6 +44,7 @@
                             <input type="checkbox" id="selectAll"/>
                         </label>
                     </th>
+                    <th>序号</th>
                     {% for id, title in [('id', 'ID'), ('title', '名称'), ('year', '年份'), ('archived', '归档'),
                     ('status', '标记'), ('tag_date', '标记时间'), ('last_update', '更新时间'), ] %}
                         <th class="sortable" id="{{ id }}">{{ title }}<span class="arrow"></span></th>
@@ -54,12 +55,13 @@
                 </thead>
                 <tbody>
                 {% for subject in subjects %}
-                    <tr id="{{ subject['id'] }}">
+                    <tr id="{{ subject['id'] }}" class="{{ loop.cycle('odd', 'even') }}">
                         <td>
                             <label>
                                 <input type="checkbox" class="batchSelect"/>
                             </label>
                         </td>
+                        <td>{{ loop.index }}</td>
                         <td>
                             {{ subject['id'] }}
                         </td>

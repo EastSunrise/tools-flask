@@ -2,6 +2,10 @@ form {
     width: 90%;
 }
 
+table tr.even {
+    background-color: gainsboro;
+}
+
 table tr th, table tr td {
     vertical-align: middle;
 }

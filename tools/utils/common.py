@@ -5,6 +5,7 @@
 """
 import types
 from enum import Enum, unique
+from sqlite3 import PrepareProtocol
 
 
 def read_config_from_py_file(filepath):
@@ -50,6 +51,11 @@ def cmp_strings(strings: list):
 
 @unique
 class BaseEnum(Enum):
+
+    def __conform__(self, protocol):
+        if protocol is PrepareProtocol:
+            return self.value.code
+
     def to_code(self) -> int:
         return self.value.code
 

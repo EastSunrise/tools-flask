@@ -44,14 +44,17 @@ def my_movies():
 
 @video_blu.route('/update')
 def update_my_movies():
-    added_count, error_count = manager().update_my_movies(request.args.get('user_id', type=int))
-    return success(added=added_count, error=error_count)
+    user_id = request.args.get('user_id', type=int)
+    if user_id:
+        added_count, error_count = manager().update_my_movies(user_id, request.args.get('start'))
+        return success(added=added_count, error=error_count)
+    else:
+        return fail('Unknown user id')
 
 
 @video_blu.route('/search')
 def search():
-    subject_id = request.args.get('id', type=int)
-    return render_template('search.jinja2', resources=manager().search_resources(subject_id))
+    return render_template('search.jinja2', resources=manager().search_resources(request.args.get('id', type=int)))
 
 
 @video_blu.route('/subject')
@@ -90,16 +93,16 @@ def play():
     return archived_result(manager().play(request.args.get('id', type=int)))
 
 
-@video_blu.route('/archive')
-@cross_origin(origins=origins)
-def archive():
-    return archived_result(manager().archive(request.args.get('id', type=int)))
-
-
 @video_blu.route('/temp')
 @cross_origin(origins=origins)
 def archive_temp():
     return archived_result(manager().archive_temp(request.args.get('id', type=int)))
+
+
+@video_blu.route('/archive')
+def archive():
+    a_c, una_c = manager().archive()
+    return success(archived=a_c, unarchived=una_c)
 
 
 @video_blu.teardown_request

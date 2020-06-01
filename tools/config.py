@@ -48,7 +48,6 @@ def init_sqlite():
     register_converter(list.__name__, lambda x: [] if x.decode('utf-8') == '[]' else x.decode('utf-8').strip('[]').split('_'))
     importlib.import_module('tools.video.enums')
     for subclass in BaseEnum.__subclasses__():
-        register_adapter(subclass, lambda x: None if x is None else x.to_code())
         register_converter(subclass.__name__, list(subclass.__members__.values())[0].from_code)
 
 
