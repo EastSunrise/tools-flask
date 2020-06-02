@@ -6,10 +6,11 @@
 </head>
 <body>
 <div>
+    {% if resources %}
     <ul>
         {% for site, rs in resources.items() %}
             <li>
-                <span>{{ site }}</span>
+                <span><a href="{{ site.home }}">{{ site.name }}</a> </span>
                 <ul>
                     {% for name, url in rs %}
                         <li>

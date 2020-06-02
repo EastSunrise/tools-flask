@@ -18,7 +18,7 @@ from pymediainfo import MediaInfo
 from tools.internet.douban import Douban
 from tools.internet.downloader import IDM, Thunder
 from tools.internet.resource import VideoSearch80s, VideoSearchXl720, VideoSearchXLC, VideoSearchZhandi, \
-    VideoSearchAxj, VideoSearchHhyyk, VideoSearchMP4
+    VideoSearchAxj
 from tools.internet.spider import pre_download
 from tools.utils import file
 from tools.video import Archived, Status, Subtype
@@ -34,8 +34,7 @@ movie_duration_error = 60  # s
 class VideoManager:
     CHINESE = ['汉语普通话', '普通话', '粤语', '闽南语', '河南方言', '贵州方言', '贵州独山话']
     JUNK_SITES = ['yutou.tv', '80s.la', '80s.im', '2tu.cc', 'bofang.cc:', 'dl.y80s.net', '80s.bz', 'xubo.cc']
-    ALL_SITES = [VideoSearch80s(), VideoSearchXl720(), VideoSearchXLC(),
-                 VideoSearchZhandi(), VideoSearchAxj(), VideoSearchHhyyk(), VideoSearchMP4()]
+    ALL_SITES = [VideoSearch80s(), VideoSearchXl720(), VideoSearchXLC(), VideoSearchZhandi(), VideoSearchAxj()]
     SOURCE_FIELDS = ['id', 'title', 'alt', 'status', 'tag_date', 'original_title', 'aka', 'subtype', 'languages', 'year',
                      'durations', 'current_season', 'episodes_count', 'season_count']
     FIELDS = SOURCE_FIELDS + ['archived', 'location', 'source', 'last_update']
@@ -128,18 +127,21 @@ class VideoManager:
                 del subject[k]
         return subject
 
-    def search_resources(self, subject_id: int):
+    def search_resources(self, key):
         """
         :return: sites and resources found
         """
-        subject = self.get_movie(id=subject_id)
-        if subject is None:
-            logger.info('No subject found with id: %d', subject_id)
-            return {}
-        resources = {}
-        for site in sorted(self.ALL_SITES, key=lambda x: x.priority):
-            resources[site.name] = site.search(subject)
-        return resources
+        if isinstance(key, int):
+            subject = self.get_movie(id=key)
+            if subject is None:
+                logger.info('No subject found with id: %d', key)
+                return {}
+            resources = {}
+            for site in sorted(self.ALL_SITES, key=lambda x: x.priority):
+                resources[site] = site.search(subject)
+            return resources
+        if isinstance(key, str):
+            pass
 
     def collect_resources(self, subject_id: int):
         """
@@ -299,18 +301,14 @@ class VideoManager:
                 file.delete_file(p, False)
         else:
             episodes_count = subject['episodes_count']
+            series = [{} for i in range(episodes_count)]
             with open('instance/tv.txt', 'a', encoding='utf-8') as fp:
-                series = [{} for i in range(episodes_count)]
                 for p, weight in weights.items():
-                    basename: str = (os.path.splitext(p)[0])
-                    name = basename.rsplit('_', 1)[1]
-                    ms = re.findall(r'\d+', name)
-                    if len(ms) == 1:
-                        i = int(ms[0])
-                        if 1 <= i <= episodes_count:
-                            series[i - 1][p] = weight
-                            continue
-                    fp.write(p + '\n')
+                    index = get_episode(os.path.splitext(os.path.basename(p)), episodes_count)
+                    if not index:
+                        fp.write(p + '\n')
+                        continue
+                    series[index - 1][p] = weight
             empties = [str(i + 1) for i, x in enumerate(series) if len(x) == 0]
             if len(empties) > 0:
                 logger.info('Not enough episodes for %s, total: %d, lacking: %s', subject['title'], episodes_count, ', '.join(empties))
@@ -321,7 +319,7 @@ class VideoManager:
                 chosen = max(files, key=lambda x: files[x])
                 logger.info('Chosen episode %d: %.2f, %s', episode, files[chosen], chosen)
                 ext = os.path.splitext(chosen)[1]
-                dst = os.path.join(location, episode_format % episode + ext)
+                dst = os.path.join(location, (episode_format % episode) + ext)
                 code, msg = file.copy(chosen, dst)
                 if code != 0:
                     continue
@@ -503,8 +501,6 @@ def weight_video(ext=None, movie_durations=None, size=-1, file_duration=-1, subt
     :param file_duration: Unit: second
     :return ratio * 100
     """
-    if movie_durations is None:
-        movie_durations = []
     weight = 0
     if ext is not None:
         if ext not in VIDEO_SUFFIXES:
@@ -525,11 +521,10 @@ def weight_video(ext=None, movie_durations=None, size=-1, file_duration=-1, subt
                     if i == len(durations) - 1:
                         return -1
             else:
-                weight += (1000 * file_duration / durations[-1] if file_duration <= durations[-1] else durations[-1] / file_duration)
+                weight += (100 * file_duration / durations[-1] if file_duration <= durations[-1] else durations[-1] / file_duration)
         if size >= 0:
             target_size = int(sum(durations) / len(durations) * standard_size)
             if size < (target_size // 2):
-                # logger.warning('Too small file: %s, request: %s', print_size(size), print_size(target_size))
                 return -1
             elif size <= target_size:
                 weight += (10 * (size / target_size))
@@ -570,6 +565,21 @@ def classify_url(url: str):
         if url.startswith(head):
             return head, url
     return 'unknown', url
+
+
+def get_episode(name, episodes_count):
+    """
+    Get the episode number by the name, range: [1:episodes_count]
+    The last and only matched numeral
+    :param name: without suffix to avoid conflict like '.mp4'
+    :return:i
+    """
+    ms = re.findall(r'\d+', name)
+    if len(ms) == 1:
+        i = int(ms[0])
+        if 1 <= i <= episodes_count:
+            return i
+    return False
 
 
 def remove_redundant_spaces(string):

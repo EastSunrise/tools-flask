@@ -54,7 +54,13 @@ def update_my_movies():
 
 @video_blu.route('/search')
 def search():
-    return render_template('search.jinja2', resources=manager().search_resources(request.args.get('id', type=int)))
+    key = request.args.get('id', type=int)
+    if key:
+        return render_template('search.jinja2', resources=manager().search_resources(key))
+    key = request.args.get('key', type=str)
+    if key:
+        return render_template('search.jinja2', resources=manager().search_resources(key))
+    return render_template('search.jinja2')
 
 
 @video_blu.route('/subject')

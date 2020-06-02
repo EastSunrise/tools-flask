@@ -23,5 +23,6 @@ class Archived(BaseEnum):
 
 
 class Subtype(BaseEnum):
+    unknown = BaseEnumValue(-1, '未知')
     movie = BaseEnumValue(0, '电影')
     tv = BaseEnumValue(1, '电视剧')
