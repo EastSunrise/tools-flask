@@ -23,7 +23,7 @@ from .spider import get_soup, browser
 class VideoSearch(metaclass=abc.ABCMeta):
 
     @abc.abstractmethod
-    def __init__(self, name, netloc, priority=10, timeout=20, scheme='https', headers=None, type_keys=None, strict=False) -> None:
+    def __init__(self, name, netloc, priority=10, timeout=20, scheme='https', headers=None, type_keys=None, unknown_keys=None, strict=False) -> None:
         self.__name = name
         self._scheme = scheme
         self._netloc = netloc
@@ -42,6 +42,7 @@ class VideoSearch(metaclass=abc.ABCMeta):
         if type_keys is None:
             raise ValueError('Not specified keys of types')
         self.__type_keys = type_keys
+        self.__unknown_keys = () if unknown_keys is None else unknown_keys
         self.__strict = strict
 
     @property
@@ -114,8 +115,9 @@ class VideoSearch(metaclass=abc.ABCMeta):
                             break
             else:
                 for resource in resources:
-                    names = self._parse_resource_name(resource['name'], subject['subtype'])
+                    names = self._parse_resource_names(resource['name'], subject['subtype'])
                     if len(matches & names) > 0:
+                        logger.info('Chosen resource: %s', resource['name'])
                         exact_resources.append(resource)
                     else:
                         logger.info('Excluded resource: %s, %s', resource['name'], self._get_full_url(resource['href']))
@@ -182,7 +184,7 @@ class VideoSearch(metaclass=abc.ABCMeta):
         pass
 
     @abc.abstractmethod
-    def _find_resources(self, soup: bs4.BeautifulSoup, subtype=Subtype.unknown) -> list:
+    def _find_resources(self, soup: bs4.BeautifulSoup, subtype) -> list:
         """
         Search resources by key and filtering by subtype is required.
         :return: [{'name': resource_name, 'href': href},...]
@@ -190,16 +192,14 @@ class VideoSearch(metaclass=abc.ABCMeta):
         pass
 
     def _is_subtype(self, subtype: Subtype, key):
-        t = None
-        for subtype, keys in self.__type_keys.items():
+        for t, keys in self.__type_keys.items():
             if key in keys:
-                t = subtype
-                break
-        if t is None:
-            raise ValueError('Unknown key of subtype: %s, site: %s' % (key, self.name))
-        return subtype == Subtype.unknown or subtype == t
+                return t == subtype
+        if key in self.__unknown_keys:
+            return False
+        raise ValueError('Unknown key of subtype: %s, site: %s' % (key, self.name))
 
-    def _parse_resource_name(self, name, subtype: Subtype):
+    def _parse_resource_names(self, name, subtype: Subtype):
         invalid_str = ['国语', '中字', '高清', 'HD', 'BD', '1280', 'DVD', '《', '》', '720p', '[', ']',
                        '1024', '576', '*', '中英字幕', '中英双字', '无水']
         for s in invalid_str:
@@ -267,9 +267,8 @@ class VideoSearch80s(VideoSearch):
             'Host': 'www.y80s.com',
         }, type_keys={
             Subtype.movie: ('movie',),
-            Subtype.tv: ('ju', 'zy'),
-            Subtype.unknown: ('dm', 'mv', 'video', 'course', 'trailer')
-        })
+            Subtype.tv: ('ju', 'zy')
+        }, unknown_keys=('dm', 'mv', 'video', 'course', 'trailer'))
 
     def _search_req(self, key, **kwargs) -> Request:
         form_data = parse.urlencode({'search_typeid': 1, 'skey': key, 'Input': '搜索'}).encode(encoding='utf-8')
@@ -278,7 +277,7 @@ class VideoSearch80s(VideoSearch):
         search_req.add_header('Referer', self.home)
         return search_req
 
-    def _find_resources(self, soup, subtype=Subtype.unknown) -> list:
+    def _find_resources(self, soup, subtype) -> list:
         resources = []
         if soup.find('div', class_='nomoviesinfo'):
             return []
@@ -316,9 +315,8 @@ class VideoSearchXl720(VideoSearch):
         }, type_keys={
             Subtype.movie: ('dongzuopian', 'fanzuipian', 'kehuanpian', 'xijupian', 'aiqingpian', 'xuanyipian', 'kongbupian',
                             'zainanpian', 'zhanzhengpian', 'maoxian', 'jingsong', 'qihuan', 'juqingpian'),
-            Subtype.tv: ('daluju', 'gangtaiju', 'rihanju', 'oumeiju'),
-            Subtype.unknown: ('donghuapian', 'jilupian')
-        })
+            Subtype.tv: ('daluju', 'gangtaiju', 'rihanju', 'oumeiju')
+        }, unknown_keys=('donghuapian', 'jilupian'))
 
     def _get_possible_titles(self, subject):
         combined_title = self._get_combined_title(subject)
@@ -330,7 +328,7 @@ class VideoSearchXl720(VideoSearch):
         return search_req
 
     # Exact match
-    def _find_resources(self, soup: bs4.BeautifulSoup, subtype=Subtype.unknown) -> list:
+    def _find_resources(self, soup: bs4.BeautifulSoup, subtype) -> list:
         resources = []
         for div in soup.find_all('div', class_='post clearfix'):
             mov_a = div.find('h3').find('a', rel='bookmark')
@@ -341,6 +339,9 @@ class VideoSearchXl720(VideoSearch):
                     'href': self._get_full_url(mov_a['href'])
                 })
         return resources
+
+    def _parse_resource_names(self, name, subtype: Subtype):
+        return {name}
 
     def _find_downs(self, soup) -> dict:
         links = {}
@@ -365,9 +366,8 @@ class VideoSearchXLC(VideoSearch):
         }, type_keys={
             Subtype.movie: ('动作片', '喜剧片', '爱情片', '科幻片', '恐怖片', '剧情片', '战争片', '其它片',
                             '4K', '1080P', '3D电影', '国语配音'),
-            Subtype.tv: ('大陆剧', '港台剧', '欧美剧', '日韩剧', '新马泰', '综艺片'),
-            Subtype.unknown: ('动画片',)
-        })
+            Subtype.tv: ('大陆剧', '港台剧', '欧美剧', '日韩剧', '新马泰', '综艺片')
+        }, unknown_keys=('动画片',))
 
     def _search_req(self, key, **kwargs) -> Request:
         form_data = parse.urlencode({'wd': key}).encode(encoding='utf-8')
@@ -376,7 +376,7 @@ class VideoSearchXLC(VideoSearch):
         search_req.add_header('Referer', self.home)
         return search_req
 
-    def _find_resources(self, soup, subtype=Subtype.unknown):
+    def _find_resources(self, soup, subtype):
         resources = []
         for mov in soup.find_all('div', {'class': 'movList4'}):
             mov_a = mov.ul.li.h3.a
@@ -422,7 +422,7 @@ class VideoSearchAxj(VideoSearch):
         super()._next_access(15)
 
     # Exact match
-    def _find_resources(self, soup: bs4.BeautifulSoup, subtype=Subtype.unknown) -> list:
+    def _find_resources(self, soup: bs4.BeautifulSoup, subtype) -> list:
         resources = []
         for dl in soup.find('div', class_='search_content').find_all('dl'):
             mov_a = dl.find('dt').find('a', class_='tlink')
@@ -431,6 +431,9 @@ class VideoSearchAxj(VideoSearch):
                 'href': mov_a['href']
             })
         return resources
+
+    def _parse_resource_names(self, name, subtype: Subtype):
+        return name
 
     def _parse_read_page(self, href, key, subtype):
         soup = bs4.BeautifulSoup(browser(self._get_full_url(href)), 'html.parser')
@@ -457,8 +460,7 @@ class VideoSearchZhandi(VideoSearch):
         }, type_keys={
             Subtype.movie: ('Dz', 'Xj', 'Aq', 'Kh', 'Kb', 'War', 'Jq'),
             Subtype.tv: ('Gc', 'Gt', 'Om', 'Rh', 'Hw', 'Zy'),
-            Subtype.unknown: ('Dm', 'Jl', 'OSK', 'Redian')
-        })
+        }, unknown_keys=('Dm', 'Jl', 'OSK', 'Redian'))
 
     def _search_req(self, key, **kwargs) -> Request:
         form_data = parse.urlencode({'wd': key}).encode(encoding='utf-8')
@@ -468,7 +470,7 @@ class VideoSearchZhandi(VideoSearch):
         search_req.add_header('Referer', self.home)
         return search_req
 
-    def _find_resources(self, soup, subtype=Subtype.unknown) -> list:
+    def _find_resources(self, soup, subtype) -> list:
         resources = []
         for mov in soup.find('ul', {'id': 'contents'}).find_all('li'):
             mov_a = mov.h5.a
@@ -509,7 +511,7 @@ class VideoSearchHhyyk(VideoSearch):
         search_req.add_header('Host', self._netloc)
         return search_req
 
-    def _find_resources(self, soup, subtype=Subtype.unknown) -> list:
+    def _find_resources(self, soup, subtype) -> list:
         resources = []
         tbody = soup.find('tbody')
         if tbody is not None:
@@ -521,11 +523,11 @@ class VideoSearchHhyyk(VideoSearch):
                 })
         return resources
 
-    def _parse_resource_name(self, name, subtype):
+    def _parse_resource_names(self, name, subtype):
         match = re.search(r'《.*》', name)
         if match:
             name = match[0].strip('《》')
-        return super()._parse_resource_name(name, subtype)
+        return super()._parse_resource_names(name, subtype)
 
     def _find_downs(self, soup):
         links = {}
@@ -552,7 +554,7 @@ class VideoSearchMP4(VideoSearch):
         search_req.add_header('Referer', self.home)
         return search_req
 
-    def _find_resources(self, soup: bs4.BeautifulSoup, subtype=Subtype.unknown) -> list:
+    def _find_resources(self, soup: bs4.BeautifulSoup, subtype) -> list:
         resources = []
         for li in soup.find('div', id='list_all').find('ul').find_all('li'):
             h2 = li.find('h2')
@@ -564,11 +566,11 @@ class VideoSearchMP4(VideoSearch):
                 })
         return resources
 
-    def _parse_resource_name(self, name, subtype):
+    def _parse_resource_names(self, name, subtype):
         match = re.search(r'《.*》', name)
         if match:
             name = match[0].strip('《》')
-        return super()._parse_resource_name(name, subtype)
+        return super()._parse_resource_names(name, subtype)
 
     def _parse_read_page(self, href, key, subtype):
         soup = bs4.BeautifulSoup(browser(self._get_full_url(href)), 'html.parser')
@@ -600,7 +602,7 @@ class SrtSearchSsk(VideoSearch):
         search_req.add_header('Referer', 'https://sskzmz.com/')
         return search_req
 
-    def _find_resources(self, soup, subtype=Subtype.unknown) -> list:
+    def _find_resources(self, soup, subtype) -> list:
         resources = []
         for mov in soup.find('div', {'class': 'row movie'}).find_all('div'):
             mov_a = mov.a

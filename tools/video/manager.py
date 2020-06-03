@@ -19,7 +19,6 @@ from tools.internet.douban import Douban
 from tools.internet.downloader import IDM, Thunder
 from tools.internet.resource import VideoSearch80s, VideoSearchXl720, VideoSearchXLC, VideoSearchZhandi, \
     VideoSearchAxj
-from tools.internet.spider import pre_download
 from tools.utils import file
 from tools.video import Archived, Status, Subtype
 
@@ -104,6 +103,33 @@ class VideoManager:
         logger.info('Finish updating movies, %d movies added, %d errors', added_count, error_count)
         return added_count, error_count
 
+    def archive_all(self):
+        subjects = self.get_movies(order_by='last_update', desc='desc')
+        archived_count = unarchived_count = 0
+        locations = set()
+        for subject in subjects:
+            archived, location = self.is_archived(subject)
+            if archived:
+                if subject['archived'] != Archived.playable or subject['location'] != location:
+                    if self.update_archived(subject['id'], Archived.playable, location):
+                        archived_count += 1
+                        locations.add(location)
+                        continue
+            elif subject['archived'] == Archived.playable:
+                if self.update_archived(subject['id'], Archived.added):
+                    unarchived_count += 1
+                    continue
+            locations.add(subject['location'])
+        logger.info('Finish archiving: %d archived, %d unarchived', archived_count, unarchived_count)
+
+        for dirpath, dirnames, filenames in os.walk(os.path.join(self.cdn, 'Movies')):
+            for filename in filenames:
+                filepath = os.path.join(dirpath, filename)
+                if filepath not in locations:
+                    logger.warning('Unarchived video file: %s', filepath)
+
+        return archived_count, unarchived_count
+
     def add_subject(self, subject_id: int):
         subject = self.get_movie(id=subject_id)
         if subject is None:
@@ -168,15 +194,7 @@ class VideoManager:
                 if any([(x in u) for x in self.JUNK_SITES]):
                     continue
                 filename, ext, size = None, None, -1
-                if p == 'http':
-                    filename = os.path.basename(u)
-                    ext = os.path.splitext(filename)[1]
-                    code, msg, args = pre_download(u)
-                    if code == 200:
-                        size = args['size']
-                    else:
-                        continue
-                elif p == 'ftp':
+                if p == 'http' or p == 'ftp':
                     filename = os.path.basename(u)
                     ext = os.path.splitext(filename)[1]
                 elif p == 'ed2k':
@@ -185,17 +203,18 @@ class VideoManager:
                     size = int(u.split('|')[3])
                 elif p == 'torrent':
                     filename = os.path.basename(u)
-                if weight_video(ext, subject['durations'], size) < 0:
+                if weight_video(subject['subtype'], ext, subject['durations'], size) < 0:
                     continue
                 links[p][u] = (u, filename, ext)
 
         dst_dir = os.path.join(self.__temp_dir, '%d_%s' % (subject_id, title))
         os.makedirs(dst_dir, exist_ok=True)
         url_count = 0
-        for u, filename, ext in links['http'].values():
-            logger.info('Add IDM task of %s, downloading from %s to the temporary dir', title, u)
-            self.__idm.add_task(u, dst_dir, '%d_%s_http_%d_%s' % (subject_id, title, url_count, filename))
-            url_count += 1
+        for p in ['http', 'ftp']:
+            for u, filename, ext in links[p].values():
+                logger.info('Add IDM task of %s, downloading from %s to the temporary dir', title, u)
+                self.__idm.add_task(u, dst_dir, '%d_%s_http_%d_%s' % (subject_id, title, url_count, filename))
+                url_count += 1
         pythoncom.CoInitialize()
         thunder = Thunder()
         for p in ['ed2k', 'ftp', 'torrent']:
@@ -217,33 +236,6 @@ class VideoManager:
         logger.info('Tasks added: %d for %s. Downloading...', url_count, title)
         return self.update_archived(subject_id, Archived.downloading)
 
-    def archive_all(self):
-        subjects = self.get_movies(order_by='last_update', desc='desc')
-        archived_count = unarchived_count = 0
-        locations = set()
-        for subject in subjects:
-            archived, location = self.is_archived(subject)
-            if archived:
-                if subject['archived'] != Archived.playable or subject['location'] != location:
-                    if self.update_archived(subject['id'], Archived.playable, location):
-                        archived_count += 1
-                        locations.add(location)
-                        continue
-            elif subject['archived'] == Archived.playable:
-                if self.update_archived(subject['id'], Archived.added):
-                    unarchived_count += 1
-                    continue
-            locations.add(subject['location'])
-        logger.info('Finish archiving: %d archived, %d unarchived', archived_count, unarchived_count)
-
-        for dirpath, dirnames, filenames in os.walk(os.path.join(self.cdn, 'Movies')):
-            for filename in filenames:
-                filepath = os.path.join(dirpath, filename)
-                if filepath not in locations:
-                    logger.warning('Unarchived video file: %s', filepath)
-
-        return archived_count, unarchived_count
-
     def archive_temp(self, subject_id):
         """
         After finishing all IDM and Thunder tasks.
@@ -263,7 +255,7 @@ class VideoManager:
                 elif os.path.splitext(filename)[1] in VIDEO_SUFFIXES:
                     path = os.path.join(dirpath, filename)
                     try:
-                        weight = weight_video_file(path, subject['durations'], subject['subtype'])
+                        weight = weight_video_file(path, subject['subtype'], subject['durations'])
                         if weight < 0:
                             file.delete_file(path, False)
                         else:
@@ -284,7 +276,7 @@ class VideoManager:
             chosen = max(weights, key=lambda x: weights[x])
             logger.info('Chosen file: %.2f, %s', weights[chosen], chosen)
             dst = os.path.splitext(location)[0] + os.path.splitext(chosen)[1]
-            if not archived or (archived and weight_video_file(location, subject['durations'], subject['subtype']) < weights[chosen]):
+            if not archived or (archived and weight_video_file(location, subject['subtype'], subject['durations']) < weights[chosen]):
                 if archived:
                     file.delete_file(location, False)
                 code, msg = file.copy(chosen, dst)
@@ -298,7 +290,10 @@ class VideoManager:
             series = [{} for i in range(episodes_count)]
             with open('instance/tv.txt', 'a', encoding='utf-8') as fp:
                 for p, weight in weights.items():
-                    index = get_episode(os.path.splitext(os.path.basename(p)), episodes_count)
+                    name = os.path.splitext(os.path.basename(p))[0]
+                    if name.startswith(str(subject_id)):
+                        name = name.rsplit('_', 1)[1]
+                    index = get_episode(name, episodes_count)
                     if not index:
                         fp.write(p + '\n')
                         continue
@@ -464,7 +459,7 @@ def get_duration(filepath):
     raise IOError('Duration Not Found')
 
 
-def weight_video_file(filepath, movie_durations=None, subtype=Subtype.movie):
+def weight_video_file(filepath, subtype: Subtype, movie_durations=None):
     """
     Read related arguments from a file.
     """
@@ -473,10 +468,10 @@ def weight_video_file(filepath, movie_durations=None, subtype=Subtype.movie):
     ext = os.path.splitext(filepath)[1]
     duration = get_duration(filepath) // 1000
     size = os.path.getsize(filepath)
-    return weight_video(ext, movie_durations, size, duration, subtype=subtype)
+    return weight_video(subtype, ext, movie_durations, size, duration)
 
 
-def weight_video(ext=None, movie_durations=None, size=-1, file_duration=-1, subtype=Subtype.movie):
+def weight_video(subtype: Subtype, ext=None, movie_durations=None, size=-1, file_duration=-1):
     """
     Calculate weight of a file for a movie. Larger the result is, higher quality the file has.
     Properties read from the file have higher priority than those specified by arguments.
