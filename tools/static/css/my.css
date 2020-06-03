@@ -1,5 +1,6 @@
-form {
+.head {
     width: 90%;
+    margin-left: 5%;
 }
 
 table tr.even {
@@ -46,6 +47,7 @@ table tbody td.archived {
 
 table {
     width: 90%;
+    margin-left: 5%;
     min-height: 25px;
     line-height: 25px;
     text-align: center;

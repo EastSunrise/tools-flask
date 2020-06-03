@@ -7,7 +7,7 @@
 </head>
 <body>
 <div>
-    <div>
+    <div class="head">
         <form id="form" action="{{ url_for('video.my_movies') }}" method="get">
             {% for k, title in [('archived', '归档'), ('status','状态'), ('subtype', '类型')] %}
                 <label> {{ title }}：
@@ -24,11 +24,11 @@
             <input type="hidden" id="order_by" name="order_by" value="{{ params['order_by'] }}"/>
             <input type="hidden" id="desc" name="desc" value="{{ params['desc'] }}"/>
         </form>
-    </div>
-    <div>
-        共<span id="totalCount">{{ subjects | length }}</span>条，已选择<span id="selectedCount">0</span>条：
-        <input type="button" id="archiveBtn" value="批量归档" onclick="archiveAll()"/>
-        <input type="button" id="updateBtn" value="更新我的" onclick="updateMyMovies()"/>
+        <div>
+            共<span id="totalCount">{{ subjects | length }}</span>条，已选择<span id="selectedCount">0</span>条：
+            <input type="button" id="archiveBtn" value="批量归档" onclick="archiveAll()"/>
+            <input type="button" id="updateBtn" value="更新我的" onclick="updateMyMovies()"/>
+        </div>
     </div>
     <div>
         {% if subjects | length == 0 %}

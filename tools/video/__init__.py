@@ -52,6 +52,12 @@ def update_my_movies():
         return fail('Unknown user id')
 
 
+@video_blu.route('/archive_all')
+def archive():
+    a_c, una_c = manager().archive_all()
+    return success(archived=a_c, unarchived=una_c)
+
+
 @video_blu.route('/search')
 def search():
     key = request.args.get('id', type=int)
@@ -103,12 +109,6 @@ def play():
 @cross_origin(origins=origins)
 def archive_temp():
     return archived_result(manager().archive_temp(request.args.get('id', type=int)))
-
-
-@video_blu.route('/archive')
-def archive():
-    a_c, una_c = manager().archive()
-    return success(archived=a_c, unarchived=una_c)
 
 
 @video_blu.teardown_request

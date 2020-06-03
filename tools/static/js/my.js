@@ -65,7 +65,7 @@
 })();
 
 function archiveAll() {
-    $.getJSON('/video/archive', function (result) {
+    $.getJSON('/video/archive_all', function (result) {
         if (result['success']) {
             alert(result['archived'] + ' archived, ' + result['unarchived'] + ' unarchived');
         }
@@ -135,7 +135,7 @@ function updateArchived(_this, archived, subject_id) {
         case 'idm':
             _this.text('IDM');
             _this.attr('title', '点击归档');
-            bindClick(_this, '正在归档', '/video/archive', subject_id, '全部下载完成？');
+            bindClick(_this, '正在归档', '/video/temp', subject_id, '全部下载完成？');
             break;
         case 'downloading':
             _this.text('下载中');
@@ -153,16 +153,21 @@ function updateArchived(_this, archived, subject_id) {
 }
 
 function updateMyMovies() {
-    $.ajax('/video/update', {
-        type: 'get',
-        dataType: 'json',
-        success: function (result) {
-            if (result['success']) {
-                alert(result['count'] + ' added');
-            }
-        },
-        error: function () {
-            alert('无法连接到服务器！');
-        },
-    });
+    let user_id = prompt('Input user id', '132842700');
+    if (user_id !== null) {
+        $.ajax('/video/update?user_id=' + user_id, {
+            type: 'get',
+            dataType: 'json',
+            success: function (result) {
+                if (result['success']) {
+                    alert(result['count'] + ' added');
+                } else {
+                    alert(result['msg']);
+                }
+            },
+            error: function () {
+                alert('无法连接到服务器！');
+            },
+        });
+    }
 }

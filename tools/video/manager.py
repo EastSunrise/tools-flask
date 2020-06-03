@@ -94,6 +94,7 @@ class VideoManager:
             except error.HTTPError as e:
                 error_count += 1
                 logger.error(e)
+                continue
 
             if subject_id in ids:
                 self.update_movie(subject_id, **subject)
@@ -216,17 +217,13 @@ class VideoManager:
         logger.info('Tasks added: %d for %s. Downloading...', url_count, title)
         return self.update_archived(subject_id, Archived.downloading)
 
-    def archive(self):
+    def archive_all(self):
         subjects = self.get_movies(order_by='last_update', desc='desc')
         archived_count = unarchived_count = 0
         locations = set()
         for subject in subjects:
             archived, location = self.is_archived(subject)
             if archived:
-                if subject['subtype'] == Subtype.movie:
-                    w = weight_video_file(location, subject['durations'], subject['subtype'])
-                    if w < 1000:
-                        logger.warning('Unqualified video file: %s, %d', location, w)
                 if subject['archived'] != Archived.playable or subject['location'] != location:
                     if self.update_archived(subject['id'], Archived.playable, location):
                         archived_count += 1
@@ -287,16 +284,13 @@ class VideoManager:
             chosen = max(weights, key=lambda x: weights[x])
             logger.info('Chosen file: %.2f, %s', weights[chosen], chosen)
             dst = os.path.splitext(location)[0] + os.path.splitext(chosen)[1]
-            if archived:
-                if weight_video_file(location, subject['durations'], subject['subtype']) < weights[chosen]:
+            if not archived or (archived and weight_video_file(location, subject['durations'], subject['subtype']) < weights[chosen]):
+                if archived:
                     file.delete_file(location, False)
-                    code, msg = file.copy(chosen, dst)
-                    if code != 0:
-                        return msg
-            else:
                 code, msg = file.copy(chosen, dst)
                 if code != 0:
                     return msg
+                location = dst
             for p in weights:
                 file.delete_file(p, False)
         else:
