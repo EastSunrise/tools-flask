@@ -6,21 +6,26 @@
 </head>
 <body>
 <div>
-    {% if resources %}
-    <ul>
-        {% for site, rs in resources.items() %}
-            <li>
-                <span><a href="{{ site.home }}">{{ site.name }}</a> </span>
-                <ul>
-                    {% for name, url in rs %}
-                        <li>
-                            <a href="{{ url }}" target="_blank">{{ name }}</a>
-                        </li>
-                    {% endfor %}
-                </ul>
-            </li>
-        {% endfor %}
-    </ul>
+    {% if resources | length == 0 %}
+        <div>
+            <span>No resources</span>
+        </div>
+    {% else %}
+        <ul>
+            {% for site, rs in resources.items() %}
+                <li>
+                    <span><a href="{{ site.home }}">{{ site.name }}</a> </span>
+                    <ul>
+                        {% for name, url in rs %}
+                            <li>
+                                <a href="{{ url }}" target="_blank">{{ name }}</a>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                </li>
+            {% endfor %}
+        </ul>
+    {% endif %}
 </div>
 <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
 </body>

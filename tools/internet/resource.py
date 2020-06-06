@@ -13,7 +13,7 @@ import time
 from urllib import parse, error, request
 from urllib.request import Request
 
-import bs4
+from bs4 import BeautifulSoup
 
 from tools.video import Subtype
 from . import logger
@@ -89,51 +89,50 @@ class VideoSearch(metaclass=abc.ABCMeta):
         :return: {url: remark, ...}
         """
         logger.info('Collecting: %s, for: %s', self.name, subject['title'])
-        keys, matches = self._get_possible_titles(subject)
+        key, matches = self._get_possible_titles(subject)
         exact_resources, urls = [], {}
-        for key in keys:
+        try:
+            self._next_access(15)
+            soup = get_soup(self._search_req(key, subtype=subject['subtype']), timeout=self._timeout)
+            resources = self._find_resources(soup, subtype=subject['subtype'])
+        except socket.timeout:
+            return urls
+        except ConnectionResetError:
+            return urls
+        if len(resources) == 0:
+            return urls
+
+        # filter resources, keeping those matches key exactly or most similarly
+        if manual:
+            for x in resources:
+                while True:
+                    c = input('%s, [y/n]: ' % x['name'])
+                    if c == 'y':
+                        exact_resources.append(x)
+                        break
+                    elif c == 'n':
+                        break
+        else:
+            for resource in resources:
+                names = self._parse_resource_names(resource['name'], subject['subtype'])
+                if len(matches & names) > 0:
+                    logger.info('Chosen resource: %s, %s', resource['name'], self._get_full_url(resource['href']))
+                    exact_resources.append(resource)
+                else:
+                    logger.info('Excluded resource: %s, %s', resource['name'], self._get_full_url(resource['href']))
+
+        # get download urls from the resources
+        for resource in exact_resources:
             try:
-                self._next_access(15)
-                soup = get_soup(self._search_req(key, subtype=subject['subtype']), timeout=self._timeout)
-                resources = self._find_resources(soup, subtype=subject['subtype'])
+                links = self._parse_read_page(resource['href'], key, subject['subtype'])
             except socket.timeout:
                 continue
             except ConnectionResetError:
                 continue
-            if len(resources) == 0:
-                continue
-
-            # filter resources, keeping those matches key exactly or most similarly
-            if manual:
-                for x in resources:
-                    while True:
-                        c = input('%s, [y/n]: ' % x['name'])
-                        if c == 'y':
-                            exact_resources.append(x)
-                            break
-                        elif c == 'n':
-                            break
+            if len(links) > 0:
+                urls.update(links)
             else:
-                for resource in resources:
-                    names = self._parse_resource_names(resource['name'], subject['subtype'])
-                    if len(matches & names) > 0:
-                        logger.info('Chosen resource: %s', resource['name'])
-                        exact_resources.append(resource)
-                    else:
-                        logger.info('Excluded resource: %s, %s', resource['name'], self._get_full_url(resource['href']))
-
-            # get download urls from the resources
-            for resource in exact_resources:
-                try:
-                    links = self._parse_read_page(resource['href'], key, subject['subtype'])
-                except socket.timeout:
-                    continue
-                except ConnectionResetError:
-                    continue
-                if len(links) > 0:
-                    urls.update(links)
-                else:
-                    logger.info('No links resource: %s', resource['name'])
+                logger.info('No links resource: %s', resource['name'])
         return urls
 
     def _get_possible_titles(self, subject):
@@ -142,39 +141,31 @@ class VideoSearch(metaclass=abc.ABCMeta):
         :return (set of keys to search, set of possible matches)
         """
         if subject['subtype'] == Subtype.movie:
-            keys = [subject['title']]
             matches = {subject['title']}
             for x in subject['aka']:
                 alia = re.sub(r'\(.*\)', '', x)
                 matches.add(alia)
                 matches.add(x)
             matches.add(subject['original_title'])
-            return keys, matches
+            return subject['title'], matches
 
         current_season = subject['current_season'] if subject['current_season'] is not None else 1
         season_str = '第%s季' % num2chinese(current_season)
-        keys = [subject['title'].replace(season_str, '').strip()]
+        base_title = subject['title'].replace(season_str, '').strip()
         matches = {subject['title']}
         for x in subject['aka']:
             alia = re.sub(r'\(.*\)', '', x)
-            # key = alia.replace(season_str, '').strip()
-            # if key not in keys:
-            #     keys.append(key)
             matches.add(alia)
             matches.add(x)
-        for key in keys:
-            if current_season == 1:
-                matches.add(key)
-            matches.update({key + season_str, key + ' ' + season_str, '%s[%s]' % (key, season_str), '%s%d' % (key, current_season)})
-        return keys, matches
-
-    @staticmethod
-    def _get_combined_title(subject):
-        if subject['title'] == subject['original_title']:
-            combined_title = '%s (%s)' % (subject['title'], subject['year'])
-        else:
-            combined_title = '%s %s (%s)' % (subject['title'], subject['original_title'], subject['year'])
-        return combined_title
+        if current_season == 1:
+            matches.add(base_title)
+        matches.update({
+            base_title + season_str,
+            base_title + ' ' + season_str,
+            '%s[%s]' % (base_title, season_str),
+            '%s%d' % (base_title, current_season)
+        })
+        return base_title, matches
 
     @abc.abstractmethod
     def _search_req(self, key, **kwargs) -> Request:
@@ -184,7 +175,7 @@ class VideoSearch(metaclass=abc.ABCMeta):
         pass
 
     @abc.abstractmethod
-    def _find_resources(self, soup: bs4.BeautifulSoup, subtype) -> list:
+    def _find_resources(self, soup: BeautifulSoup, subtype) -> list:
         """
         Search resources by key and filtering by subtype is required.
         :return: [{'name': resource_name, 'href': href},...]
@@ -226,7 +217,7 @@ class VideoSearch(metaclass=abc.ABCMeta):
         return self._find_downs(read_soup)
 
     @abc.abstractmethod
-    def _find_downs(self, soup) -> dict:
+    def _find_downs(self, soup: BeautifulSoup) -> dict:
         """
         get useful urls on the page which href links to.
         :return: {down_url: remark, ...}, remark probably contain password if url is from pan.baidu.com
@@ -239,6 +230,8 @@ class VideoSearch(metaclass=abc.ABCMeta):
         """
         if href.startswith('http'):
             href = parse.splithost(parse.splittype(href)[1])[1]
+        if href.startswith('//'):
+            return '%s:%s' % (self._scheme, href)
         if href.startswith('/'):
             return '%s://%s%s' % (self._scheme, self._netloc, href) + \
                    ('' if not query_params else ('?' + parse.urlencode(query_params)))
@@ -263,39 +256,37 @@ class VideoSearch80s(VideoSearch):
     """
 
     def __init__(self) -> None:
-        super().__init__('80s', 'www.y80s.com', priority=1, scheme='http', timeout=20, headers={
-            'Host': 'www.y80s.com',
+        super().__init__('80s', 'm.y80s.com', priority=1, scheme='http', timeout=20, headers={
+            'Host': 'm.y80s.com',
         }, type_keys={
             Subtype.movie: ('movie',),
             Subtype.tv: ('ju', 'zy')
         }, unknown_keys=('dm', 'mv', 'video', 'course', 'trailer'))
 
     def _search_req(self, key, **kwargs) -> Request:
-        form_data = parse.urlencode({'search_typeid': 1, 'skey': key, 'Input': '搜索'}).encode(encoding='utf-8')
-        search_req = request.Request(self._get_full_url('/movie/search'), data=form_data, headers=self._headers, method='POST')
+        form_data = parse.urlencode({'keyword': key}).encode(encoding='utf-8')
+        search_req = request.Request(self._get_full_url('/search'), data=form_data, headers=self._headers, method='POST')
         search_req.add_header('Origin', self.home)
         search_req.add_header('Referer', self.home)
         return search_req
 
     def _find_resources(self, soup, subtype) -> list:
         resources = []
-        if soup.find('div', class_='nomoviesinfo'):
-            return []
-        ul = soup.find('ul', {'class': 'me1 clearfix'})
-        for mov in ul.find_all('li'):
-            mov_a = mov.h3.a
-            if self._is_subtype(subtype, mov_a['href'].strip('/').split('/')[-2]):
+        for mov_a in soup.find('div', class_='list-group').find_all('a', class_='list-group-item'):
+            href: str = mov_a['href']
+            if self._is_subtype(subtype, href.rstrip('/').split('/')[-2]):
+                small = mov_a.find('small')
                 resources.append({
-                    'name': mov_a.get_text().strip(),
-                    'href': mov_a['href']
+                    'name': str(small.previous_sibling).strip(),
+                    'href': 'http:%s' % href,
+                    'year': int(small.get_text())
                 })
         return resources
 
-    def _find_downs(self, soup):
-        # todo expand for tv
+    def _find_downs(self, soup: BeautifulSoup):
         links = {}
-        for span in soup.find_all('span', {'class': 'dlname nm'}):
-            down_a = span.span.a
+        for tr in soup.find('table').find_all('tr'):
+            down_a = tr.td.a
             links[down_a['href']] = down_a.get_text().strip()
         return links
 
@@ -319,8 +310,9 @@ class VideoSearchXl720(VideoSearch):
         }, unknown_keys=('donghuapian', 'jilupian'))
 
     def _get_possible_titles(self, subject):
-        combined_title = self._get_combined_title(subject)
-        return {combined_title}, {combined_title}
+        key, matches = super()._get_possible_titles(subject)
+        matches.update(get_exact_title(subject))
+        return key, matches
 
     def _search_req(self, key, **kwargs) -> Request:
         search_req = request.Request(self._get_full_url('/', s=key), headers=self._headers, method='GET')
@@ -328,7 +320,7 @@ class VideoSearchXl720(VideoSearch):
         return search_req
 
     # Exact match
-    def _find_resources(self, soup: bs4.BeautifulSoup, subtype) -> list:
+    def _find_resources(self, soup: BeautifulSoup, subtype) -> list:
         resources = []
         for div in soup.find_all('div', class_='post clearfix'):
             mov_a = div.find('h3').find('a', rel='bookmark')
@@ -389,9 +381,10 @@ class VideoSearchXLC(VideoSearch):
 
     def _find_downs(self, soup):
         links = {}
-        for down_ul in soup.find_all('ul', {'class': 'down-list'}):
-            down_a = down_ul.li.div.span.a
-            links[down_a['href']] = down_a.get_text().strip()
+        for down_ul in soup.find('div', class_='ui-limit').find_all('ul', {'class': 'down-list'}):
+            for down_li in down_ul.find_all('li', class_='item'):
+                down_a = down_li.div.span.a
+                links[down_a['href']] = down_a.get_text().strip()
         return links
 
 
@@ -409,8 +402,9 @@ class VideoSearchAxj(VideoSearch):
         })
 
     def _get_possible_titles(self, subject):
-        combined_title = self._get_combined_title(subject)
-        return {combined_title}, {combined_title}
+        key, matches = super()._get_possible_titles(subject)
+        matches.update(get_exact_title(subject))
+        return key, matches
 
     def _search_req(self, key, **kwargs) -> Request:
         search_req = request.Request(self._get_full_url('/app-thread-run', app='search', keywords=key, orderby='lastpost_time'),
@@ -422,7 +416,7 @@ class VideoSearchAxj(VideoSearch):
         super()._next_access(15)
 
     # Exact match
-    def _find_resources(self, soup: bs4.BeautifulSoup, subtype) -> list:
+    def _find_resources(self, soup: BeautifulSoup, subtype) -> list:
         resources = []
         for dl in soup.find('div', class_='search_content').find_all('dl'):
             mov_a = dl.find('dt').find('a', class_='tlink')
@@ -433,10 +427,10 @@ class VideoSearchAxj(VideoSearch):
         return resources
 
     def _parse_resource_names(self, name, subtype: Subtype):
-        return name
+        return {name}
 
     def _parse_read_page(self, href, key, subtype):
-        soup = bs4.BeautifulSoup(browser(self._get_full_url(href)), 'html.parser')
+        soup = BeautifulSoup(browser(self._get_full_url(href)), 'html.parser')
         return self._find_downs(soup)
 
     def _find_downs(self, soup) -> dict:
@@ -554,7 +548,7 @@ class VideoSearchMP4(VideoSearch):
         search_req.add_header('Referer', self.home)
         return search_req
 
-    def _find_resources(self, soup: bs4.BeautifulSoup, subtype) -> list:
+    def _find_resources(self, soup: BeautifulSoup, subtype) -> list:
         resources = []
         for li in soup.find('div', id='list_all').find('ul').find_all('li'):
             h2 = li.find('h2')
@@ -573,7 +567,7 @@ class VideoSearchMP4(VideoSearch):
         return super()._parse_resource_names(name, subtype)
 
     def _parse_read_page(self, href, key, subtype):
-        soup = bs4.BeautifulSoup(browser(self._get_full_url(href)), 'html.parser')
+        soup = BeautifulSoup(browser(self._get_full_url(href)), 'html.parser')
         return self._find_downs(soup)
 
     def _find_downs(self, soup) -> dict:
@@ -634,3 +628,14 @@ def num2chinese(num: int) -> str:
     if num == 20:
         return '二十'
     return '十' + CHINESE_NUMERALS[num - 10]
+
+
+def get_exact_title(subject):
+    if subject['title'] == subject['original_title']:
+        combined_title = subject['title']
+    else:
+        combined_title = '%s %s' % (subject['title'], subject['original_title'])
+    matches = {'%s (%s)' % (combined_title, subject['year'])}
+    if subject['subtype'] == Subtype.tv and subject['current_season'] is not None:
+        matches.add('%s Season %d (%s)' % (combined_title, subject['current_season'], subject['year']))
+    return matches

@@ -158,11 +158,21 @@ def get_soup(req: Request, pause=0.0, timeout=10) -> BeautifulSoup:
 
 
 options = webdriver.ChromeOptions()
-options.headless = True
-chrome = webdriver.Chrome(options=options, executable_path='chromedriver 81.0.4044.138.exe')
+options.headless = False
 
 
-def browser(url):
+def browser(url, func=None):
+    """
+    simulate browser
+    :param url:
+    :param func: function for extra operations with a WebDriver as the argument
+    :return:
+    """
     logger.info('Get from %s', url)
+    chrome = webdriver.Chrome(options=options, executable_path='chromedriver 81.0.4044.138.exe')
     chrome.get(url)
-    return chrome.page_source
+    if func is not None:
+        func(chrome)
+    source = chrome.page_source
+    chrome.close()
+    return source

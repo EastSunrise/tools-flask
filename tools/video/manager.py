@@ -25,9 +25,11 @@ from tools.video import Archived, Status, Subtype
 logger = logging.getLogger(__name__)
 
 VIDEO_SUFFIXES = ('.avi', '.rmvb', '.mp4', '.mkv')
-standard_kbps = 2500  # kb/s
-standard_size = standard_kbps * 7680  # B/min
-movie_duration_error = 60  # s
+movie_standard_kbps = 2000  # kb/s
+movie_standard_size = movie_standard_kbps * 7680  # B/min
+tv_standard_kbps = 1000  # kb/s
+tv_standard_size = tv_standard_kbps * 7680  # B/min
+movie_duration_error = 60  # seconds
 
 
 class VideoManager:
@@ -158,12 +160,12 @@ class VideoManager:
         """
         :return: sites and resources found
         """
+        resources = {}
         if isinstance(key, int):
             subject = self.get_movie(id=key)
             if subject is None:
                 logger.info('No subject found with id: %d', key)
                 return {}
-            resources = {}
             for site in sorted(self.ALL_SITES, key=lambda x: x.priority):
                 resources[site] = site.search(subject)
             return resources
@@ -189,7 +191,8 @@ class VideoManager:
 
         links = {'http': {}, 'ed2k': {}, 'pan': {}, 'ftp': {}, 'magnet': {}, 'torrent': {}, 'unknown': {}}
         for site in sorted(self.ALL_SITES, key=lambda x: x.priority):
-            for url, remark in site.collect(subject).items():
+            resources = site.collect(subject)
+            for url, remark in resources.items():
                 p, u = classify_url(url)
                 if any([(x in u) for x in self.JUNK_SITES]):
                     continue
@@ -293,17 +296,18 @@ class VideoManager:
                     name = os.path.splitext(os.path.basename(p))[0]
                     if name.startswith(str(subject_id)):
                         name = name.rsplit('_', 1)[1]
-                    index = get_episode(name, episodes_count)
+                    index = get_episode(name, episodes_count, subject['current_season'])
                     if not index:
                         fp.write(p + '\n')
                         continue
                     series[index - 1][p] = weight
             empties = [str(i + 1) for i, x in enumerate(series) if len(x) == 0]
             if len(empties) > 0:
-                logger.info('Not enough episodes for %s, total: %d, lacking: %s', subject['title'], episodes_count, ', '.join(empties))
-                return self.update_archived(subject_id, Archived.none)
+                return 'Not enough episodes for %s, total: %d, lacking: %s' % (subject['title'], episodes_count, ', '.join(empties))
             episode_format = 'E%%0%dd' % math.ceil(math.log10(episodes_count + 1))
             for episode, files in enumerate(series):
+                if len(files) == 0:
+                    continue
                 episode += 1
                 chosen = max(files, key=lambda x: files[x])
                 logger.info('Chosen episode %d: %.2f, %s', episode, files[chosen], chosen)
@@ -510,9 +514,14 @@ def weight_video(subtype: Subtype, ext=None, movie_durations=None, size=-1, file
                     if i == len(durations) - 1:
                         return -1
             else:
-                weight += (100 * file_duration / durations[-1] if file_duration <= durations[-1] else durations[-1] / file_duration)
+                dst_duration = durations[-1] * 60
+                if file_duration < dst_duration:
+                    percent = file_duration / dst_duration
+                else:
+                    percent = dst_duration / file_duration
+                weight += (1000 * percent)
         if size >= 0:
-            target_size = int(sum(durations) / len(durations) * standard_size)
+            target_size = int(sum(durations) / len(durations) * (movie_standard_size if subtype == Subtype.movie else tv_standard_size))
             if size < (target_size // 2):
                 return -1
             elif size <= target_size:
@@ -556,17 +565,28 @@ def classify_url(url: str):
     return 'unknown', url
 
 
-def get_episode(name, episodes_count):
+def get_episode(name, episodes_count, current_season) -> int:
     """
     Get the episode number by the name, range: [1:episodes_count]
     The last and only matched numeral
     :param name: without suffix to avoid conflict like '.mp4'
     :return:i
     """
+    match = re.search(r'E(\d+)', name)
+    if match is not None:
+        season_match = re.search(r'S(\d+)', name)
+        if season_match is None or int(season_match.group(1)) == current_season:
+            return int(match.group(1))
+
     ms = re.findall(r'\d+', name)
     if len(ms) == 1:
         i = int(ms[0])
         if 1 <= i <= episodes_count:
+            return i
+    elif len(ms) == 2:
+        s = int(ms[0])
+        i = int(ms[1])
+        if s == current_season and 1 <= i <= episodes_count:
             return i
     return False
 
