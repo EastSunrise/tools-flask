@@ -44,9 +44,9 @@ def my_movies():
 
 @video_blu.route('/update')
 def update_my_movies():
-    user_id = request.args.get('user_id', type=int)
-    if user_id:
-        added_count, error_count = manager().update_my_movies(user_id, request.args.get('start'))
+    user = request.args.get('user', type=int)
+    if user:
+        added_count, error_count = manager().update_my_movies(user, request.args.get('start'))
         return success(added=added_count, error=error_count)
     else:
         return fail('Unknown user id')

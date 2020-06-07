@@ -109,7 +109,7 @@ class Douban:
         wrapper = soup.find('div', id='wrapper')
         subject = {}
 
-        keywords = [x.strip() for x in soup.find('meta', name='keywords')['content'].split(',')]
+        keywords = [x.strip() for x in soup.find('meta', {'name': 'keywords'})['content'].split(',')]
         subject['title'] = keywords[0]
         subject['original_title'] = keywords[1]
         subject['year'] = wrapper.find('h1').find('span', class_='year').get_text().strip().strip('()')

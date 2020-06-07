@@ -291,16 +291,15 @@ class VideoManager:
         else:
             episodes_count = subject['episodes_count']
             series = [{} for i in range(episodes_count)]
-            with open('instance/tv.txt', 'a', encoding='utf-8') as fp:
-                for p, weight in weights.items():
-                    name = os.path.splitext(os.path.basename(p))[0]
-                    if name.startswith(str(subject_id)):
-                        name = name.rsplit('_', 1)[1]
-                    index = get_episode(name, episodes_count, subject['current_season'])
-                    if not index:
-                        fp.write(p + '\n')
-                        continue
-                    series[index - 1][p] = weight
+            for p, weight in weights.items():
+                name = os.path.splitext(os.path.basename(p))[0]
+                if name.startswith(str(subject_id)):
+                    name = name.rsplit('_', 1)[1]
+                index = get_episode(name, episodes_count, subject['current_season'])
+                if not index:
+                    logger.warning('Can\'t get episode from: %s', p)
+                    continue
+                series[index - 1][p] = weight
             empties = [str(i + 1) for i, x in enumerate(series) if len(x) == 0]
             if len(empties) > 0:
                 return 'Not enough episodes for %s, total: %d, lacking: %s' % (subject['title'], episodes_count, ', '.join(empties))
