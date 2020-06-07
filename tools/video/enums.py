@@ -25,3 +25,13 @@ class Archived(BaseEnum):
 class Subtype(BaseEnum):
     movie = BaseEnumValue(0, '电影')
     tv = BaseEnumValue(1, '电视剧')
+
+
+class Protocol(BaseEnum):
+    unknown = BaseEnumValue(0, '未知')
+    http = BaseEnumValue(1, 'HTTP/HTTPS')
+    ftp = BaseEnumValue(2, 'FTP')
+    torrent = BaseEnumValue(3, '种子')
+    ed2k = BaseEnumValue(4, 'ed2k')
+    magnet = BaseEnumValue(5, '磁力链接')
+    pan = BaseEnumValue(6, '百度云')

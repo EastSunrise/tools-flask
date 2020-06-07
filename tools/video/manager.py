@@ -21,6 +21,7 @@ from tools.internet.resource import VideoSearch80s, VideoSearchXl720, VideoSearc
     VideoSearchAxj
 from tools.utils import file
 from tools.video import Archived, Status, Subtype
+from tools.video.enums import Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +190,7 @@ class VideoManager:
             logger.info('File exists for the subject %s: %s', title, location)
             return self.update_archived(subject_id, Archived.playable, location)
 
-        links = {'http': {}, 'ed2k': {}, 'pan': {}, 'ftp': {}, 'magnet': {}, 'torrent': {}, 'unknown': {}}
+        links = dict([(v, {}) for v in Protocol.__members__.values()])
         for site in sorted(self.ALL_SITES, key=lambda x: x.priority):
             resources = site.collect(subject)
             for url, remark in resources.items():
@@ -197,14 +198,14 @@ class VideoManager:
                 if any([(x in u) for x in self.JUNK_SITES]):
                     continue
                 filename, ext, size = None, None, -1
-                if p == 'http' or p == 'ftp':
+                if p == Protocol.http or p == Protocol.ftp:
                     filename = os.path.basename(u)
                     ext = os.path.splitext(filename)[1]
-                elif p == 'ed2k':
+                elif p == Protocol.ed2k:
                     filename = u.split('|')[2]
                     ext = os.path.splitext(filename)[1]
                     size = int(u.split('|')[3])
-                elif p == 'torrent':
+                elif p == Protocol.torrent:
                     filename = os.path.basename(u)
                 if weight_video(subject['subtype'], ext, subject['durations'], size) < 0:
                     continue
@@ -213,19 +214,19 @@ class VideoManager:
         dst_dir = os.path.join(self.__temp_dir, '%d_%s' % (subject_id, title))
         os.makedirs(dst_dir, exist_ok=True)
         url_count = 0
-        for p in ['http', 'ftp']:
+        for p in [Protocol.http, Protocol.ftp]:
             for u, filename, ext in links[p].values():
                 logger.info('Add IDM task of %s, downloading from %s to the temporary dir', title, u)
                 self.__idm.add_task(u, dst_dir, '%d_%s_http_%d_%s' % (subject_id, title, url_count, filename))
                 url_count += 1
         pythoncom.CoInitialize()
         thunder = Thunder()
-        for p in ['ed2k', 'ftp', 'torrent']:
+        for p in [Protocol.ed2k, Protocol.ftp, Protocol.torrent]:
             for u, filename, ext in links[p].values():
                 logger.info('Add Thunder task of %s, downloading from %s to the temporary dir', title, u)
                 thunder.add_task(u, '%d_%s_%s_%d_%s' % (subject_id, title, p, url_count, filename))
                 url_count += 1
-        for p in ['magnet']:
+        for p in [Protocol.magnet]:
             for u, filename, ext in links[p].values():
                 logger.info('Add Thunder task of %s, downloading from %s to the temporary dir', title, u)
                 thunder.add_task(u, '')
@@ -532,7 +533,7 @@ def weight_video(subtype: Subtype, ext=None, movie_durations=None, size=-1, file
     return weight
 
 
-def classify_url(url: str):
+def classify_url(url: str) -> (Protocol, str):
     """
     Classify and decode a url. Optional protocols: http/ed2k/pan/ftp/magnet/torrent/unknown
 
@@ -551,17 +552,23 @@ def classify_url(url: str):
             try:
                 url = url.decode('gbk').strip('AAZZ')
             except UnicodeDecodeError:
-                return 'unknown', src
+                return Protocol.unknown, src
     url = parse.unquote(url.rstrip('/'))
 
-    if 'pan.baidu.com' in url:
-        return 'pan', url
-    if url.endswith('.torrent'):
-        return 'torrent', url
-    for head in ['ftp', 'http', 'ed2k', 'magnet']:
-        if url.startswith(head):
-            return head, url
-    return 'unknown', url
+    if url.startswith('http'):
+        if 'pan.baidu.com' in url:
+            return Protocol.pan, url
+        if url.endswith('.torrent'):
+            return Protocol.torrent, url
+        return Protocol.http, url
+    elif url.startswith('ftp'):
+        return Protocol.ftp, url
+    elif url.startswith('ed2k'):
+        if re.match(r'ed2k://\|file\|\d+\|\S+', url):
+            return Protocol.ed2k, url
+    elif url.startswith('magnet'):
+        return Protocol.magnet, url
+    return Protocol.unknown, url
 
 
 def get_episode(name, episodes_count, current_season) -> int:
