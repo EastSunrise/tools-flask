@@ -155,7 +155,7 @@ function updateArchived(_this, archived, subject_id) {
 function updateMyMovies() {
     let user_id = prompt('Input user id', '132842700');
     if (user_id !== null) {
-        $.ajax('/video/update?user_id=' + user_id, {
+        $.ajax('/video/update?user=' + user_id, {
             type: 'get',
             dataType: 'json',
             success: function (result) {

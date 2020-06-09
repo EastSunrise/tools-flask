@@ -256,7 +256,7 @@ class VideoManager:
             for filename in filenames:
                 if filename.endswith('.torrent'):
                     pass
-                elif os.path.splitext(filename)[1] in VIDEO_SUFFIXES:
+                elif any_suffix(filename, *VIDEO_SUFFIXES):
                     path = os.path.join(dirpath, filename)
                     try:
                         weight = weight_video_file(path, subject['subtype'], subject['durations'])
@@ -496,7 +496,7 @@ def weight_video(subtype: Subtype, ext=None, movie_durations=None, size=-1, file
     """
     weight = 0
     if ext is not None:
-        if ext not in VIDEO_SUFFIXES:
+        if not any_suffix(ext, *VIDEO_SUFFIXES):
             return -1
         else:
             if ext in ('.mp4', '.mkv'):
@@ -578,6 +578,7 @@ def get_episode(name, episodes_count, current_season) -> int:
     :param name: without suffix to avoid conflict like '.mp4'
     :return:i
     """
+    name = name.replace('www.ygdy8.com', '')
     match = re.search(r'E(\d+)', name)
     if match is not None:
         season_match = re.search(r'S(\d+)', name)
@@ -639,3 +640,16 @@ def print_size(size: int):
             return '%.2f %s' % (size, unit)
         size /= 1024
     return '%.2f %s' % (size, 'PB')
+
+
+def any_suffix(path: str, *args) -> bool:
+    index = path.rfind('.')
+    if index < 0:
+        return False
+    if index > 0:
+        path = path[index:]
+    ext = path.lower()
+    for suffix in args:
+        if ext == suffix.lower():
+            return True
+    return False
