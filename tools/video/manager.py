@@ -217,14 +217,14 @@ class VideoManager:
         for p in [Protocol.http, Protocol.ftp]:
             for u, filename, ext in links[p].values():
                 logger.info('Add IDM task of %s, downloading from %s to the temporary dir', title, u)
-                self.__idm.add_task(u, dst_dir, '%d_%s_http_%d_%s' % (subject_id, title, url_count, filename))
+                self.__idm.add_task(u, dst_dir, '%d_%s_%s_%d_%s' % (subject_id, title, p.name, url_count, filename))
                 url_count += 1
         pythoncom.CoInitialize()
         thunder = Thunder()
         for p in [Protocol.ed2k, Protocol.ftp, Protocol.torrent]:
             for u, filename, ext in links[p].values():
                 logger.info('Add Thunder task of %s, downloading from %s to the temporary dir', title, u)
-                thunder.add_task(u, '%d_%s_%s_%d_%s' % (subject_id, title, p, url_count, filename))
+                thunder.add_task(u, '%d_%s_%s_%d_%s' % (subject_id, title, p.name, url_count, filename))
                 url_count += 1
         for p in [Protocol.magnet]:
             for u, filename, ext in links[p].values():

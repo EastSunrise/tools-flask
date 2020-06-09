@@ -160,7 +160,7 @@ function updateMyMovies() {
             dataType: 'json',
             success: function (result) {
                 if (result['success']) {
-                    alert(result['count'] + ' added');
+                    alert(result['added'] + ' added, ' + result['error'] + ' errors');
                 } else {
                     alert(result['msg']);
                 }
