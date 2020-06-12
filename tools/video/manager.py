@@ -28,8 +28,6 @@ logger = logging.getLogger(__name__)
 VIDEO_SUFFIXES = ('.avi', '.rmvb', '.mp4', '.mkv')
 movie_standard_kbps = 2000  # kb/s
 movie_standard_size = movie_standard_kbps * 7680  # B/min
-tv_standard_kbps = 1000  # kb/s
-tv_standard_size = tv_standard_kbps * 7680  # B/min
 movie_duration_error = 60  # seconds
 
 
@@ -197,17 +195,16 @@ class VideoManager:
                 p, u = classify_url(url)
                 if any([(x in u) for x in self.JUNK_SITES]):
                     continue
-                filename, ext, size = None, None, -1
+                filename, ext = None, None
                 if p == Protocol.http or p == Protocol.ftp:
                     filename = os.path.basename(u)
                     ext = os.path.splitext(filename)[1]
                 elif p == Protocol.ed2k:
                     filename = u.split('|')[2]
                     ext = os.path.splitext(filename)[1]
-                    size = int(u.split('|')[3])
                 elif p == Protocol.torrent:
                     filename = os.path.basename(u)
-                if weight_video(subject['subtype'], ext, subject['durations'], size) < 0:
+                if ext is not None and not any_suffix(ext, *VIDEO_SUFFIXES):
                     continue
                 links[p][u] = (u, filename, ext)
 
@@ -260,8 +257,9 @@ class VideoManager:
                     path = os.path.join(dirpath, filename)
                     try:
                         weight = weight_video_file(path, subject['subtype'], subject['durations'])
-                        if weight < 0:
-                            file.delete_file(path, False)
+                        if isinstance(weight, str):
+                            logger.warning('Unqualified file: %s, %s', weight, path)
+                            file.delete_file(path, True)
                         else:
                             weights[path] = weight
                     except IOError as e:
@@ -497,7 +495,7 @@ def weight_video(subtype: Subtype, ext=None, movie_durations=None, size=-1, file
     weight = 0
     if ext is not None:
         if not any_suffix(ext, *VIDEO_SUFFIXES):
-            return -1
+            return 'Unknown suffix: %s' % ext
         else:
             if ext in ('.mp4', '.mkv'):
                 weight += 100
@@ -512,7 +510,7 @@ def weight_video(subtype: Subtype, ext=None, movie_durations=None, size=-1, file
                         weight += (1000 * (i + 1) / len(durations))
                         break
                     if i == len(durations) - 1:
-                        return -1
+                        return 'Wrong duration: %d min, [%s]' % (file_duration, ', '.join(movie_durations))
             else:
                 dst_duration = durations[-1] * 60
                 if file_duration < dst_duration:
@@ -521,15 +519,13 @@ def weight_video(subtype: Subtype, ext=None, movie_durations=None, size=-1, file
                     percent = dst_duration / file_duration
                 weight += (1000 * percent)
         if size >= 0:
-            target_size = int(sum(durations) / len(durations) * (movie_standard_size if subtype == Subtype.movie else tv_standard_size))
-            if size < (target_size // 2):
-                return -1
-            elif size <= target_size:
-                weight += (10 * (size / target_size))
-            elif size <= (target_size * 2):
-                weight += (10 * (target_size / size))
+            target_size = int(sum(durations) / len(durations) * movie_standard_size)
+            if size < (target_size // 3):
+                return 'Too small size: %s, required: %s' % (print_size(size), print_size(target_size))
+            if size < target_size:
+                weight += size / target_size * 10
             else:
-                weight += (20 * (target_size / size) ** 2)
+                weight += target_size / size * 10
     return weight
 
 
