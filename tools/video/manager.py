@@ -89,16 +89,15 @@ class VideoManager:
         for subject_id, subject in self.__douban.collect_user_movies(user_id, start_date=start_date).items():
             subject['status'] = Status.from_name(Status, subject.get('status'))
             subject_id = int(subject_id)
-            try:
-                subject.update(self.movie_subject(subject_id))
-            except error.HTTPError as e:
-                error_count += 1
-                logger.error(e)
-                continue
-
             if subject_id in ids:
                 self.update_movie(subject_id, **subject)
             else:
+                try:
+                    subject.update(self.movie_subject(subject_id))
+                except error.HTTPError as e:
+                    error_count += 1
+                    logger.error(e)
+                    continue
                 if self.add_movie(subject):
                     added_count += 1
         logger.info('Finish updating movies, %d movies added, %d errors', added_count, error_count)
@@ -259,18 +258,15 @@ class VideoManager:
                         weight = weight_video_file(path, subject['subtype'], subject['durations'])
                         if isinstance(weight, str):
                             logger.warning('Unqualified file: %s, %s', weight, path)
-                            file.delete_file(path, True)
                         else:
                             weights[path] = weight
                     except IOError as e:
                         logger.error(e)
-                        file.delete_file(path, True)
                 else:
                     return 'Not all downloaded'
 
         if len(weights) == 0:
             logger.warning('No qualified video file: %s', subject['title'])
-            shutil.rmtree(dst_dir)
             return self.update_archived(subject_id, Archived.none)
 
         archived, location = self.is_archived(subject)
@@ -285,8 +281,7 @@ class VideoManager:
                 if code != 0:
                     return msg
                 location = dst
-            for p in weights:
-                file.delete_file(p, False)
+            shutil.rmtree(dst_dir)
         else:
             episodes_count = subject['episodes_count']
             series = [{} for i in range(episodes_count)]
@@ -304,8 +299,6 @@ class VideoManager:
                 return 'Not enough episodes for %s, total: %d, lacking: %s' % (subject['title'], episodes_count, ', '.join(empties))
             episode_format = 'E%%0%dd' % math.ceil(math.log10(episodes_count + 1))
             for episode, files in enumerate(series):
-                if len(files) == 0:
-                    continue
                 episode += 1
                 chosen = max(files, key=lambda x: files[x])
                 logger.info('Chosen episode %d: %.2f, %s', episode, files[chosen], chosen)
@@ -313,10 +306,8 @@ class VideoManager:
                 dst = os.path.join(location, (episode_format % episode) + ext)
                 code, msg = file.copy(chosen, dst)
                 if code != 0:
-                    continue
-                for p in files:
-                    file.delete_file(p, False)
-        shutil.rmtree(dst_dir)
+                    return msg
+            shutil.rmtree(dst_dir)
         return self.update_archived(subject_id, Archived.playable, location=location)
 
     def play(self, subject_id):
@@ -506,11 +497,12 @@ def weight_video(subtype: Subtype, ext=None, movie_durations=None, size=-1, file
         if file_duration >= 0:
             if subtype == Subtype.movie:
                 for i, duration in enumerate(durations):
-                    if abs(duration * 60 - file_duration) < movie_duration_error:
+                    duration_sec = duration * 60
+                    if duration_sec - 30 < file_duration < duration_sec + 120:
                         weight += (1000 * (i + 1) / len(durations))
                         break
                     if i == len(durations) - 1:
-                        return 'Wrong duration: %d min, [%s]' % (file_duration, ', '.join(movie_durations))
+                        return 'Wrong duration: %.2f min, [%s]' % (file_duration / 60, ', '.join(movie_durations))
             else:
                 dst_duration = durations[-1] * 60
                 if file_duration < dst_duration:

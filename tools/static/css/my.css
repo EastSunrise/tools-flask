@@ -1,6 +1,10 @@
-.head, .content {
+.head {
     width: 90%;
     margin-left: 5%;
+}
+
+.content {
+    width: 100%;
 }
 
 table tr.even {
