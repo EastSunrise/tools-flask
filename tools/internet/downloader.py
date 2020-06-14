@@ -12,7 +12,7 @@ from urllib.request import urlopen, Request
 from win32com.client import Dispatch
 
 from . import logger
-from .spider import quote_url, pre_download, base_headers
+from .spider import quote_url, pre_download, BASE_HEADERS
 
 
 class IDM:
@@ -137,7 +137,7 @@ class Downloader:
         if total_size <= self.bound_size:
             logger.info('Downloading from %s to %s', url, filepath)
             with open(filepath, 'wb') as fp:
-                with urlopen(Request(quote_url(url), headers=base_headers, method='GET')) as r:
+                with urlopen(Request(quote_url(url), headers=BASE_HEADERS, method='GET')) as r:
                     fp.write(r)
             logger.info('Success downloading: %s', filepath)
             return 200, 'OK'
@@ -146,7 +146,7 @@ class Downloader:
         if not multi_thread:
             logger.info('Downloading from %s to %s', url, filepath)
             with open(filepath, 'wb') as fp:
-                with urlopen(Request(quote_url(url), headers=base_headers, method='GET')) as r:
+                with urlopen(Request(quote_url(url), headers=BASE_HEADERS, method='GET')) as r:
                     done_size = 0
                     while True:
                         block = r.read(self._DownloadThread.block_size)
@@ -207,7 +207,7 @@ class Downloader:
             super().__init__()
             self.__req = Request(quote_url(url), headers={
                 'Range': 'bytes=%d-%d' % (start, start + size),
-                **base_headers
+                **BASE_HEADERS
             }, method='GET')
             self.__fp = fp
             self.__fp.seek(start)

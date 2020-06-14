@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS movie
     current_season INTEGER,
     episodes_count INTEGER,
     seasons_count  INTEGER,
+    imdb           INTEGER,           -- IMDb No.
     archived       Archived NOT NULL, -- none/added/playable/idm/downloading
     location       TEXT,
     source         TEXT,

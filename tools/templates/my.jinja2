@@ -49,6 +49,7 @@
                     ('status', '标记'), ('tag_date', '标记时间'), ('last_update', '更新时间'), ] %}
                         <th class="sortable" id="{{ id }}">{{ title }}<span class="arrow"></span></th>
                     {% endfor %}
+                    <th>IMDb</th>
                     <th>时长</th>
                     <th>搜索</th>
                 </tr>
@@ -80,6 +81,13 @@
                         <td>{{ subject['status'].value.title }}</td>
                         <td>{{ subject['tag_date'] or '' }}</td>
                         <td>{{ subject['last_update'] }}</td>
+                        <td>
+                            {% if subject['imdb'] is not none %}
+                                <a href="https://imdb.com/title/tt{{ '%07d'|format(subject['imdb']) }}/">
+                                    tt{{ '%07d'|format(subject['imdb']) }}
+                                </a>
+                            {% endif %}
+                        </td>
                         <td>{{ subject['durations'] | join('/') }}</td>
                         <td>
                             <a href="{{ url_for('video.search') }}?id={{ subject['id'] }}" target="_blank">搜索</a>

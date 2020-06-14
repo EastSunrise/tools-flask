@@ -122,7 +122,7 @@ def close_connection(e=None):
 def manager():
     if 'manager' not in g:
         global config
-        g.manager = VideoManager(config.cdn, config.video_db, config.idm_path, config.api_key, config.cookie)
+        g.manager = VideoManager(config.cdn, config.video_db, config.idm_path, config.api_key)
     return g.manager
 
 

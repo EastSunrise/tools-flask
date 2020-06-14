@@ -10,12 +10,12 @@ import os
 import re
 import shutil
 from sqlite3 import connect, PARSE_DECLTYPES, Row
-from urllib import parse, error
+from urllib import parse
 
 import pythoncom
 from pymediainfo import MediaInfo
 
-from tools.internet.douban import Douban
+from tools.internet.douban import Douban, IMDb
 from tools.internet.downloader import IDM, Thunder
 from tools.internet.resource import VideoSearch80s, VideoSearchXl720, VideoSearchXLC, VideoSearchZhandi, \
     VideoSearchAxj
@@ -36,16 +36,15 @@ class VideoManager:
     JUNK_SITES = ['yutou.tv', '80s.la', '80s.im', '2tu.cc', 'bofang.cc:', 'dl.y80s.net', '80s.bz', 'xubo.cc']
     ALL_SITES = [VideoSearch80s(), VideoSearchXl720(), VideoSearchXLC(), VideoSearchZhandi(), VideoSearchAxj()]
     SOURCE_FIELDS = ['id', 'title', 'alt', 'status', 'tag_date', 'original_title', 'aka', 'subtype', 'languages', 'year',
-                     'durations', 'current_season', 'episodes_count', 'season_count']
+                     'durations', 'current_season', 'episodes_count', 'season_count', 'imdb']
     FIELDS = SOURCE_FIELDS + ['archived', 'location', 'source', 'last_update']
 
-    def __init__(self, cdn, db_path, idm_path, api_key, cookie) -> None:
+    def __init__(self, cdn, db_path, idm_path, api_key) -> None:
         self.cdn = cdn
         self.__temp_dir = os.path.join(self.cdn, 'Temp')
         self.__db = db_path
         self.__idm = IDM(idm_path, self.__temp_dir)
         self.__douban: Douban = Douban(api_key)
-        self.__cookie = cookie
         self.__con = None
 
     @property
@@ -80,21 +79,20 @@ class VideoManager:
 
         :param start_date: when tag_date start
         """
-        subjects = self.get_movies()
-        ids = [m['id'] for m in subjects]
+        subjects = dict([(x['id'], x) for x in self.get_movies()])
         if start_date is None and len(subjects) > 0:
-            start_date = max([x['tag_date'] for x in subjects if x['tag_date'] is not None])
+            start_date = max([x['tag_date'] for x in subjects.values() if x['tag_date'] is not None])
         logger.info('Start updating movies since %s', start_date if start_date else '')
         added_count = error_count = 0
         for subject_id, subject in self.__douban.collect_user_movies(user_id, start_date=start_date).items():
             subject['status'] = Status.from_name(Status, subject.get('status'))
             subject_id = int(subject_id)
-            if subject_id in ids:
+            if subject_id in subjects:
                 self.update_movie(subject_id, **subject)
             else:
                 try:
                     subject.update(self.movie_subject(subject_id))
-                except error.HTTPError as e:
+                except Exception as e:
                     error_count += 1
                     logger.error(e)
                     continue
@@ -138,17 +136,17 @@ class VideoManager:
         return True
 
     def movie_subject(self, subject_id):
-        try:
-            subject = self.__douban.movie_subject(subject_id)
-        except error.HTTPError as e:
-            if e.code == 404:
-                subject = self.__douban.movie_subject_with_cookie(subject_id, self.__cookie)
-            else:
-                raise
+        subject = self.__douban.movie_subject(subject_id)
         subject['subtype'] = Subtype.from_name(Subtype, subject['subtype'])
         subject['title'] = remove_redundant_spaces(subject['title'])
         subject['original_title'] = remove_redundant_spaces(subject['original_title'])
         remove_redundant_spaces(subject['aka'])
+        subject['imdb'] = int(re.fullmatch(r'https://www.imdb.com/title/tt(\d+)', subject['imdb']).group(1))
+        ds = dict([(re.search(r'(\d+)', d).group(1), d) for d in subject['durations']])
+        for d in IMDb().title_technical(subject['imdb'])['durations']:
+            if re.match(r'(\d+)', d).group(1) not in ds:
+                subject['durations'].append(d)
+
         for k in subject.copy():
             if k not in self.FIELDS:
                 del subject[k]
